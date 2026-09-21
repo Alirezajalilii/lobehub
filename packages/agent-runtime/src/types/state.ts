@@ -194,6 +194,17 @@ export interface AgentRunHostEnvelope {
   /** Opt into runtime state snapshots on step_complete events. Defaults to false. */
   includeFinalState?: boolean;
   /**
+   * The run was created without its init — tool discovery and the message /
+   * context assembly still have to happen before step 0 can execute. The worker
+   * runs them, replaces this with the initialized slots, and only then starts
+   * the step.
+   *
+   * `envelope` is opaque here on purpose: the runtime carries it, the host is
+   * the only thing that reads it (`DeferredInitEnvelope` on the server), exactly
+   * like the serialized hooks above.
+   */
+  init?: { envelope: unknown; pending: true };
+  /**
    * The client that started this run can execute single LLM attempts the
    * server relays to it (`llm_execute`), for model providers only the user's
    * device can reach (a local Ollama, a private-network endpoint). Declared by
