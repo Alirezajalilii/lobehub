@@ -14,7 +14,12 @@ import type {
   ScheduleAgentRunResult,
   UserInterventionConfig,
 } from '@lobechat/types';
-import { getWorkingDirEffectivePath, RequestTrigger } from '@lobechat/types';
+import {
+  agentShareFileAccessScope,
+  getWorkingDirEffectivePath,
+  ordinaryFileAccessScope,
+  RequestTrigger,
+} from '@lobechat/types';
 import { nanoid } from '@lobechat/utils';
 import { TRPCError } from '@trpc/server';
 import debug from 'debug';
@@ -60,6 +65,7 @@ import type {
   GroupActionMemberBridgeParams,
 } from '@/server/services/agentRuntime/types';
 import { ComposioService } from '@/server/services/composio';
+import { DocumentService } from '@/server/services/document';
 import { MarketService } from '@/server/services/market';
 import { markdownToTxt } from '@/utils/markdownToTxt';
 
@@ -1497,6 +1503,13 @@ export class AiAgentService {
           loadHistoryMessages,
           messageModel: this.messageModel,
           pluginModel: this.pluginModel,
+          readFileContent: async (fileId) =>
+            (
+              await new DocumentService(this.db, this.userId, this.workspaceId).parseFile(
+                fileId,
+                shareGate ? agentShareFileAccessScope(shareGate) : ordinaryFileAccessScope,
+              )
+            ).content ?? undefined,
           throwIfExecutionAborted,
           topicModel: this.topicModel,
           userId: this.userId,
