@@ -2118,13 +2118,13 @@ export class AgentRuntimeService {
         if (agentState.request && !isTerminalAgentStatus(agentState.status)) {
           if (await this.coordinator.isInterrupted(operationId)) {
             // Stop pressed during the init window. Skip the discovery nobody is
-            // waiting for, but do NOT return here: the terminal branch below
-            // emits the completion signals and dispatches the hooks, which is
-            // what settles the durable row and every completion consumer. The
-            // state may still read `running` if the interrupt landed only its
-            // sentinel before a crash, so make the stop visible to that branch.
+            // waiting for, but still settle the run: the state may read
+            // `running` if the interrupt landed only its sentinel before a
+            // crash. Return before `step_start` — persisting the stop publishes
+            // `agent_runtime_end`, and no step event may follow it.
             log('[%s][%d] Interrupted before deferred init; skipping it', operationId, stepIndex);
             await this.persistStopBeforeInit(operationId, agentState);
+            return this.settleSkippedStep(operationId, agentState);
           } else {
             // A shared-agent run revoked between enqueue and step 0 must not
             // get creator-scoped discovery and history/persona assembly first:
@@ -2162,6 +2162,7 @@ export class AgentRuntimeService {
               );
               await this.persistStopBeforeInit(operationId, latest ?? agentState);
               Object.assign(agentState, latest ?? {}, { status: 'interrupted' });
+              return this.settleSkippedStep(operationId, agentState);
             } else {
               // One write: the initialized slots, the assembled context (a
               // redelivery after this save finds the request gone and must still
@@ -2287,19 +2288,7 @@ export class AgentRuntimeService {
             agentState.status,
           );
 
-          const reason = this.determineCompletionReason(agentState);
-
-          await this.completionLifecycle.emitSignalEvents(operationId, agentState, reason);
-
-          // Dispatch completion hooks so consumers (e.g., bot local-mode promise) can finalize
-          await this.completionLifecycle.dispatchHooks(operationId, agentState, reason);
-
-          return {
-            nextStepScheduled: false,
-            state: agentState,
-            stepResult: null,
-            success: true,
-          };
+          return this.settleSkippedStep(operationId, agentState);
         }
 
         // A run parked for a client moves only through its own resume: any other
@@ -2459,9 +2448,11 @@ export class AgentRuntimeService {
         // `executeSync` follows. For an ordinary run it is the context that was
         // queued; for a deferred init it is the one the init assembled, which the
         // queued placeholder predates, including on a redelivery after the save.
-        const savedInitialContext = (agentState as AgentState & {
-          initialContext?: AgentRuntimeContext;
-        }).initialContext;
+        const savedInitialContext = (
+          agentState as AgentState & {
+            initialContext?: AgentRuntimeContext;
+          }
+        ).initialContext;
         let currentContext =
           deferredInitContext ?? (stepIndex === 0 ? (savedInitialContext ?? context) : context);
         // The wait this step resumes, if any: a resumed call that finds no client
@@ -5339,6 +5330,25 @@ export class AgentRuntimeService {
     }
 
     return undefined;
+  }
+
+  /**
+   * Settle a step that will not run because the operation is already terminal:
+   * emit the completion signals and dispatch the completion hooks so consumers
+   * (e.g. the bot local-mode promise) can finalize. Publishes no step event.
+   */
+  private async settleSkippedStep(operationId: string, agentState: AgentState) {
+    const reason = this.determineCompletionReason(agentState);
+
+    await this.completionLifecycle.emitSignalEvents(operationId, agentState, reason);
+    await this.completionLifecycle.dispatchHooks(operationId, agentState, reason);
+
+    return {
+      nextStepScheduled: false,
+      state: agentState,
+      stepResult: null,
+      success: true,
+    };
   }
 
   /**
