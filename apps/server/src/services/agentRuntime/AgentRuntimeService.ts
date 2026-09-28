@@ -1845,32 +1845,22 @@ export class AgentRuntimeService {
     // marked that operation interrupted. ACK it without touching the old
     // topic; otherwise the abandoned attempt can finish concurrently with its
     // replacement and submit a second Acceptance run.
-    try {
-      const durableOperation = await this.agentOperationModel.findById(operationId);
-      if (
-        durableOperation &&
-        ['done', 'error', 'interrupted', 'abandoned'].includes(durableOperation.status)
-      ) {
-        log(
-          '[%s][%d] Skipping delivery for terminal durable operation (%s)',
-          operationId,
-          stepIndex,
-          durableOperation.status,
-        );
-        return {
-          nextStepScheduled: false,
-          state: {
-            status:
-              durableOperation.status === 'abandoned' ? 'interrupted' : durableOperation.status,
-          },
-          stepResult: null,
-          success: true,
-        };
-      }
-    } catch (error) {
-      // Preserve runtime availability when the durable store has a transient
-      // read failure. The step lock and normal persistence path still apply.
-      log('[%s][%d] Durable operation status check failed: %O', operationId, stepIndex, error);
+    const durableTerminalStatus = await this.loadTerminalDurableStatus(operationId, stepIndex);
+    if (durableTerminalStatus) {
+      log(
+        '[%s][%d] Skipping delivery for terminal durable operation (%s)',
+        operationId,
+        stepIndex,
+        durableTerminalStatus,
+      );
+      return {
+        nextStepScheduled: false,
+        state: {
+          status: durableTerminalStatus === 'abandoned' ? 'interrupted' : durableTerminalStatus,
+        },
+        stepResult: null,
+        success: true,
+      };
     }
 
     // Watchdog re-check for a parked async-tool wait: re-run the barrier + CAS
@@ -2175,6 +2165,32 @@ export class AgentRuntimeService {
               await this.persistStopBeforeInit(operationId, latest ?? agentState);
               Object.assign(agentState, latest ?? {}, { status: 'interrupted' });
               return this.settleSkippedStep(operationId, agentState);
+            }
+
+            // The init can outlive the inactivity watchdog: abandonment (or a
+            // recovery that replaced this run) settles the operation, its
+            // lifecycle included, and may delete the runtime state while the
+            // init is awaited. A missing state, a terminal one, or a terminal
+            // durable row all mean the run is no longer this worker's — saving
+            // the stale `running` snapshot would resurrect it into LLM work.
+            const endedStatus = !latest
+              ? 'missing'
+              : isTerminalAgentStatus(latest.status)
+                ? latest.status
+                : await this.loadTerminalDurableStatus(operationId, stepIndex);
+            if (endedStatus) {
+              log(
+                '[%s][%d] Operation ended during deferred init (%s); discarding its result',
+                operationId,
+                stepIndex,
+                endedStatus,
+              );
+              return {
+                nextStepScheduled: false,
+                state: latest ?? {},
+                stepResult: null,
+                success: true,
+              };
             } else {
               // One write: the initialized slots, the assembled context (a
               // redelivery after this save finds the request gone and must still
@@ -5361,6 +5377,33 @@ export class AgentRuntimeService {
       stepResult: null,
       success: true,
     };
+  }
+
+  /**
+   * The durable operation row's status when it is terminal, else `undefined`.
+   * Redis keeps the resumable step state, but the row is the authority for
+   * cancellation, abandonment and recovery. A read failure preserves runtime
+   * availability: it reads as not terminal, and the step lock and the normal
+   * persistence path still apply.
+   */
+  private async loadTerminalDurableStatus(
+    operationId: string,
+    stepIndex: number,
+  ): Promise<'abandoned' | 'done' | 'error' | 'interrupted' | undefined> {
+    try {
+      const status = (await this.agentOperationModel.findById(operationId))?.status;
+      if (
+        status === 'done' ||
+        status === 'error' ||
+        status === 'interrupted' ||
+        status === 'abandoned'
+      ) {
+        return status;
+      }
+    } catch (error) {
+      log('[%s][%d] Durable operation status check failed: %O', operationId, stepIndex, error);
+    }
+    return undefined;
   }
 
   /**

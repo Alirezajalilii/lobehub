@@ -1397,6 +1397,55 @@ describe('AgentRuntimeService', () => {
         }
       });
 
+      // The init can outlive the inactivity watchdog. Abandonment settles the
+      // run itself and may delete the runtime state; this worker must not save
+      // its stale `running` snapshot back and step on it.
+      describe('when the run is abandoned while the init runs', () => {
+        const runAbandonedDuringInit = async (
+          arrange: (ctx: { coordinator: any; findById: any }) => void,
+        ) => {
+          const runDeferredInit = vi.fn().mockResolvedValue({
+            context: { phase: 'user_input', payload: {} },
+            state: { operationToolSet: { enabledToolIds: ['lobe-web-browsing'] } },
+          });
+          const svc = buildService(runDeferredInit);
+          const { coordinator, step } = wireStep(svc);
+          coordinator.isInterrupted.mockResolvedValue(false);
+          const findById = vi
+            .spyOn((svc as any).agentOperationModel, 'findById')
+            .mockResolvedValue({ id: 'test-operation-1', status: 'running' });
+          arrange({ coordinator, findById });
+          const publish = vi.spyOn((svc as any).streamManager, 'publishStreamEvent');
+
+          const result = await svc.executeStep({ ...mockParams, stepIndex: 0 });
+
+          expect(runDeferredInit).toHaveBeenCalledTimes(1);
+          expect(result).toMatchObject({ nextStepScheduled: false, success: true });
+          expect(coordinator.saveAgentState).not.toHaveBeenCalled();
+          expect(step).not.toHaveBeenCalled();
+          expect(publish).not.toHaveBeenCalledWith(
+            'test-operation-1',
+            expect.objectContaining({ type: 'step_start' }),
+          );
+        };
+
+        it('discards the init result when the runtime state was deleted', async () => {
+          await runAbandonedDuringInit(({ coordinator }) => {
+            coordinator.loadAgentState
+              .mockResolvedValueOnce(pendingState())
+              .mockResolvedValue(null);
+          });
+        });
+
+        it('discards the init result when the durable row turned terminal', async () => {
+          await runAbandonedDuringInit(({ findById }) => {
+            findById
+              .mockResolvedValueOnce({ id: 'test-operation-1', status: 'running' })
+              .mockResolvedValue({ id: 'test-operation-1', status: 'error' });
+          });
+        });
+      });
+
       it('does not initialize a shared run whose share was revoked after enqueue', async () => {
         const runDeferredInit = vi.fn();
         const verifyShareRunStillAuthorized = vi.fn().mockResolvedValue(false);
