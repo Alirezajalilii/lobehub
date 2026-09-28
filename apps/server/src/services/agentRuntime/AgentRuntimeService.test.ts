@@ -1341,6 +1341,34 @@ describe('AgentRuntimeService', () => {
         );
       });
 
+      // Stop finished both writes before the worker loaded the state: it is
+      // already `interrupted` but still carries its request. The stop's own save
+      // published `agent_runtime_end`, so this delivery may publish no step
+      // event and must not persist the stop a second time.
+      it('settles a stop that was fully persisted before the init, without a step_start', async () => {
+        const runDeferredInit = vi.fn();
+        const svc = buildService(runDeferredInit);
+        const { coordinator, step } = wireStep(svc);
+        coordinator.loadAgentState.mockResolvedValue({ ...pendingState(), status: 'interrupted' });
+        const lifecycle = (svc as any).completionLifecycle;
+        const emit = vi.spyOn(lifecycle, 'emitSignalEvents').mockResolvedValue([]);
+        const dispatch = vi.spyOn(lifecycle, 'dispatchHooks').mockResolvedValue(undefined);
+        const publish = vi.spyOn((svc as any).streamManager, 'publishStreamEvent');
+
+        const result = await svc.executeStep({ ...mockParams, stepIndex: 0 });
+
+        expect(result.success).toBe(true);
+        expect(publish).not.toHaveBeenCalledWith(
+          'test-operation-1',
+          expect.objectContaining({ type: 'step_start' }),
+        );
+        expect(runDeferredInit).not.toHaveBeenCalled();
+        expect(step).not.toHaveBeenCalled();
+        expect(coordinator.saveAgentState).not.toHaveBeenCalled();
+        expect(emit).toHaveBeenCalledWith('test-operation-1', expect.anything(), 'interrupted');
+        expect(dispatch).toHaveBeenCalledWith('test-operation-1', expect.anything(), 'interrupted');
+      });
+
       it('discards the init result when Stop lands while the init runs', async () => {
         const runDeferredInit = vi.fn().mockResolvedValue({
           context: { phase: 'user_input', payload: {} },

@@ -1,5 +1,6 @@
 import type { LobeChatDatabase } from '@lobechat/database';
 import type { AgentRunInitRequest, RequestTrigger } from '@lobechat/types';
+import pMap from 'p-map';
 
 import type { AgentModel } from '@/database/models/agent';
 import type { ConnectorModel } from '@/database/models/connector';
@@ -109,6 +110,12 @@ export const toPersistedInitRequest = (request: OperationInitRequest): Operation
 };
 
 /**
+ * How many detached bodies are read back at once. Each read hits the documents
+ * table (and may re-parse), and the attachment list is caller-sized.
+ */
+const REHYDRATE_CONCURRENCY = 5;
+
+/**
  * Put back the bodies `toPersistedInitRequest` detached. Only those ids are
  * read: a file whose parse failed at turn setup has no body on purpose, and must
  * not be re-parsed here.
@@ -119,10 +126,11 @@ export const rehydrateDetachedFileContent = async (
 ): Promise<OperationInitRequest> => {
   const detached = new Set(request.detachedFileContentIds ?? []);
   if (detached.size === 0 || !request.runAttachments.fileList) return request;
-  const fileList = await Promise.all(
-    request.runAttachments.fileList.map(async (file) =>
+  const fileList = await pMap(
+    request.runAttachments.fileList,
+    async (file) =>
       detached.has(file.id) ? { ...file, content: await readFileContent(file.id) } : file,
-    ),
+    { concurrency: REHYDRATE_CONCURRENCY },
   );
   const { detachedFileContentIds: _ids, ...rest } = request;
   return { ...rest, runAttachments: { ...request.runAttachments, fileList } };

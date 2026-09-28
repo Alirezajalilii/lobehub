@@ -2115,8 +2115,20 @@ export class AgentRuntimeService {
         // error on its assistant message, which is the only honest outcome once
         // the user has already been told the message was sent.
         let deferredInitContext: AgentRuntimeContext | undefined;
-        if (agentState.request && !isTerminalAgentStatus(agentState.status)) {
-          if (await this.coordinator.isInterrupted(operationId)) {
+        if (agentState.request) {
+          if (isTerminalAgentStatus(agentState.status)) {
+            // The run ended before its init ran — typically a Stop whose writes
+            // all landed first. That save already published
+            // `agent_runtime_end`, so settle here, before `step_start`, and do
+            // not persist the terminal state a second time.
+            log(
+              '[%s][%d] Operation already %s before deferred init; skipping it',
+              operationId,
+              stepIndex,
+              agentState.status,
+            );
+            return this.settleSkippedStep(operationId, agentState);
+          } else if (await this.coordinator.isInterrupted(operationId)) {
             // Stop pressed during the init window. Skip the discovery nobody is
             // waiting for, but still settle the run: the state may read
             // `running` if the interrupt landed only its sentinel before a
