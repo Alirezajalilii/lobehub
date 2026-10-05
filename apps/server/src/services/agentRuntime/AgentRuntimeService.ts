@@ -2201,6 +2201,24 @@ export class AgentRuntimeService {
                 request: undefined,
               });
               await this.coordinator.saveAgentState(operationId, agentState);
+
+              // The checks above and this save are not atomic: a Stop landing in
+              // between has already written its sentinel and interrupted state
+              // (publishing `agent_runtime_end`), which the save just overwrote
+              // with `running`. Re-check the sentinel once more and, if it is
+              // set, put the stop back and settle without a step event. A Stop
+              // after this point lands on the saved state and is handled like
+              // any Stop during a step.
+              if (await this.coordinator.isInterrupted(operationId)) {
+                log(
+                  '[%s][%d] Interrupted while the deferred init was saved; restoring the stop',
+                  operationId,
+                  stepIndex,
+                );
+                await this.persistStopBeforeInit(operationId, agentState);
+                return this.settleSkippedStep(operationId, agentState);
+              }
+
               deferredInitContext = initialized.context;
               log(
                 '[%s][%d] Deferred init finished in %dms',

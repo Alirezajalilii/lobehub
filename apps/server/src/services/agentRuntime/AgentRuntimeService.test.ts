@@ -1397,6 +1397,45 @@ describe('AgentRuntimeService', () => {
         }
       });
 
+      // Stop can land after the post-init checks but before the init's save,
+      // which then overwrites the interrupted state with `running`. The stop
+      // already published `agent_runtime_end`, so the save must be undone and
+      // no step event may follow.
+      it('restores a stop that landed while the init result was being saved', async () => {
+        const runDeferredInit = vi.fn().mockResolvedValue({
+          context: { phase: 'user_input', payload: {} },
+          state: { operationToolSet: { enabledToolIds: ['lobe-web-browsing'] } },
+        });
+        const svc = buildService(runDeferredInit);
+        const { coordinator, step } = wireStep(svc);
+        // Clear before the init and at the post-init check; set right after the save.
+        coordinator.isInterrupted
+          .mockResolvedValueOnce(false)
+          .mockResolvedValueOnce(false)
+          .mockResolvedValue(true);
+        vi.spyOn((svc as any).agentOperationModel, 'findById').mockResolvedValue({
+          id: 'test-operation-1',
+          status: 'running',
+        });
+        const lifecycle = (svc as any).completionLifecycle;
+        vi.spyOn(lifecycle, 'emitSignalEvents').mockResolvedValue([]);
+        const dispatch = vi.spyOn(lifecycle, 'dispatchHooks').mockResolvedValue(undefined);
+        const publish = vi.spyOn((svc as any).streamManager, 'publishStreamEvent');
+
+        const result = await svc.executeStep({ ...mockParams, stepIndex: 0 });
+
+        expect(result.success).toBe(true);
+        expect(step).not.toHaveBeenCalled();
+        expect(publish).not.toHaveBeenCalledWith(
+          'test-operation-1',
+          expect.objectContaining({ type: 'step_start' }),
+        );
+        // The last write leaves the run interrupted, not `running`.
+        const saves = coordinator.saveAgentState.mock.calls;
+        expect(saves.at(-1)[1]).toMatchObject({ status: 'interrupted' });
+        expect(dispatch).toHaveBeenCalledWith('test-operation-1', expect.anything(), 'interrupted');
+      });
+
       // The init can outlive the inactivity watchdog. Abandonment settles the
       // run itself and may delete the runtime state; this worker must not save
       // its stale `running` snapshot back and step on it.
