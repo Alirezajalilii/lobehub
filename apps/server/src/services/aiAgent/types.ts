@@ -331,6 +331,8 @@ export interface InternalExecAgentParams extends ExecAgentParams {
    * Use { approvalMode: 'headless' } for async tasks that should never wait for human approval
    */
   userInterventionConfig?: UserInterventionConfig;
+  /** Lexical editor state of the user message this run creates (rich text, action tags). */
+  userMessageEditorData?: Record<string, any>;
   /**
    * Client-selected context for the user message this run creates (page / code
    * selections, desktop local-file snapshots), persisted on that row.

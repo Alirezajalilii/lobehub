@@ -1526,6 +1526,40 @@ describe('ConversationLifecycle actions', () => {
         );
       });
 
+      // Regression: a drained queued follow-up carries its selections only in
+      // `metadata`, and the editor state never reached the server-created row.
+      it('should send queued selections and the editor state with the gateway run', async () => {
+        const { result } = renderHook(() => useChatStore());
+        const executeGatewayAgent = mockGatewayAgent();
+        const pageSelections = [
+          { content: 'queued text', id: 'sel-2', pageId: 'page-1', xml: '<p>queued text</p>' },
+        ] as any;
+        const editorData = {
+          root: {
+            children: [
+              { children: [{ text: TEST_CONTENT.USER_MESSAGE, type: 'text' }], type: 'paragraph' },
+            ],
+            type: 'root',
+          },
+        } as any;
+
+        await act(async () => {
+          await result.current.sendMessage({
+            context: createTestContext(),
+            editorData,
+            message: TEST_CONTENT.USER_MESSAGE,
+            metadata: { pageSelections, steer: true } as any,
+          });
+        });
+
+        expect(executeGatewayAgent).toHaveBeenCalledWith(
+          expect.objectContaining({
+            editorData,
+            metadata: expect.objectContaining({ pageSelections, steer: true }),
+          }),
+        );
+      });
+
       it('should work when sending from home page (activeAgentId is empty but context.agentId exists)', async () => {
         const { result } = renderHook(() => useChatStore());
 

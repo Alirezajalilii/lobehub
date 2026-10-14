@@ -22,6 +22,7 @@ import {
   applyTopicModelToHeterogeneousProvider,
   getWorkingDirEffectivePath,
   getWorkingDirSourcePath,
+  pickSendUserMessageMetadata,
   RequestTrigger,
   resolveAgentAgencyConfig,
 } from '@lobechat/types';
@@ -1905,9 +1906,9 @@ export class ConversationLifecycleActionImpl {
         ...((metadata as Pick<MessageMetadata, 'steer'> | undefined)?.steer && {
           steer: true as const,
         }),
-        ...(contextSelections?.length && { contextSelections }),
-        ...(pageSelections?.length && { pageSelections }),
-        ...(localSystemToolSnapshots.length && { localSystemToolSnapshots }),
+        // `userMessageMetadata` also holds selections a queued follow-up
+        // carries in `metadata` (the drain re-sends without the arguments).
+        ...pickSendUserMessageMetadata(userMessageMetadata),
       };
       const gatewayRequestMetadata =
         Object.keys(gatewayRequestMetadataFields).length > 0
@@ -1938,6 +1939,7 @@ export class ConversationLifecycleActionImpl {
             ? { ...operationContext, topicId: undefined }
             : operationContext,
           messageContext: operationContext,
+          editorData,
           fileIds: fileIdList,
           message: persistedContent,
           // The server persists the user row on this path, so a queued

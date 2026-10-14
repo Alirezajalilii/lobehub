@@ -1026,6 +1026,8 @@ export class GatewayActionImpl {
     /** Agent/runtime context used to execute the server operation. */
     context: ConversationContext;
     /** File IDs of already-uploaded attachments to attach to the new user message */
+    /** Lexical editor state of the user message the server creates (fresh sends). */
+    editorData?: Record<string, any>;
     fileIds?: string[];
     message: string;
     /**
@@ -1122,6 +1124,7 @@ export class GatewayActionImpl {
       clientIds,
       clientOperations,
       context: executionContext,
+      editorData,
       fileIds,
       message,
       messageContext = executionContext,
@@ -1341,6 +1344,7 @@ export class GatewayActionImpl {
               steer: metadata?.steer,
               trigger: metadata?.trigger,
               userInterventionConfig,
+              userMessageEditorData: editorData,
               userMessageMetadata: pickSendUserMessageMetadata(metadata),
             }),
             abortSignal,

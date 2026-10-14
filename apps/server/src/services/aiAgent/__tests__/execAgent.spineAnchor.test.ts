@@ -432,10 +432,12 @@ describe('AiAgentService.execAgent - queued follow-up steer mark', () => {
       agentId: 'agent-1',
       appContext: { topicId: 'topic-1' },
       prompt: 'Explain this',
+      userMessageEditorData: { root: { type: 'root' } },
       userMessageMetadata: { pageSelections } as any,
     });
 
     expect(userMessageCall()![0].metadata).toMatchObject({ pageSelections });
+    expect(userMessageCall()![0].editorData).toEqual({ root: { type: 'root' } });
   });
 
   it('leaves an ordinary user turn unmarked', async () => {

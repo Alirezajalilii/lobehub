@@ -1367,7 +1367,8 @@ const ExecAgentSchema = z
      * so tool calls auto-execute without waiting for human approval.
      */
     userInterventionConfig: UserInterventionConfigSchema.optional(),
-    /** Selected context for the user message this run creates. */
+    /** Selected context and Lexical editor state for the user message this run creates. */
+    userMessageEditorData: z.record(z.string(), z.any()).optional(),
     userMessageMetadata: SendUserMessageMetadataSchema.optional(),
   })
   .refine((data) => data.agentId || data.slug, {
@@ -2545,6 +2546,7 @@ export const aiAgentRouter = router({
       steer,
       trigger,
       userInterventionConfig,
+      userMessageEditorData,
       userMessageMetadata,
     } = input;
 
@@ -2681,6 +2683,7 @@ export const aiAgentRouter = router({
         trigger: trigger ?? RequestTrigger.Chat,
         userAgent: ctx.userAgent ?? undefined,
         userInterventionConfig,
+        userMessageEditorData,
         userMessageMetadata,
       });
       // The run was dispatched but it did not take the Task's run row over. Two

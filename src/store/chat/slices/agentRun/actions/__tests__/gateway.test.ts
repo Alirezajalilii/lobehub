@@ -2006,12 +2006,14 @@ describe('GatewayActionImpl', () => {
 
       await action.executeGatewayAgent({
         context: { agentId: 'agent-1', topicId: 'topic-1', threadId: null, scope: 'main' },
+        editorData: { root: { type: 'root' } },
         message: 'Explain this',
         metadata: { pageSelections },
       });
 
       expect(aiAgentService.execAgentTask).toHaveBeenCalledWith(
         expect.objectContaining({
+          userMessageEditorData: { root: { type: 'root' } },
           userMessageMetadata: expect.objectContaining({ pageSelections }),
         }),
       );
