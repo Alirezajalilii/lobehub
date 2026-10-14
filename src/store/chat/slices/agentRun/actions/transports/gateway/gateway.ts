@@ -23,8 +23,9 @@ import type {
   ExecAgentResult,
   MessageMetadata,
   RuntimeMentionedAgent,
+  SendUserMessageMetadata,
 } from '@lobechat/types';
-import { resolveAgentAgencyConfig } from '@lobechat/types';
+import { pickSendUserMessageMetadata, resolveAgentAgencyConfig } from '@lobechat/types';
 import { t } from 'i18next';
 
 import { isDesktop } from '@/const/version';
@@ -1034,7 +1035,7 @@ export class GatewayActionImpl {
      */
     messageContext?: ConversationContext;
     /** Request metadata carried from the originating user message. */
-    metadata?: Pick<MessageMetadata, 'steer' | 'trigger'>;
+    metadata?: Pick<MessageMetadata, 'steer' | 'trigger'> & SendUserMessageMetadata;
     /** Called as soon as phase-1 returns with a persisted user message. */
     onMessageAccepted?: () => void;
     /** Called when a new topic is persisted, before UI hydration and stream setup. */
@@ -1340,6 +1341,7 @@ export class GatewayActionImpl {
               steer: metadata?.steer,
               trigger: metadata?.trigger,
               userInterventionConfig,
+              userMessageMetadata: pickSendUserMessageMetadata(metadata),
             }),
             abortSignal,
             (abandoned) =>

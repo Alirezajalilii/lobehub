@@ -19,6 +19,7 @@ import {
   isServerDefaultHeterogeneousRelayInvocation,
   LocalExecutionHeterogeneousAgentTypeSchema,
   RequestTrigger,
+  SendUserMessageMetadataSchema,
   ThreadStatus,
   ThreadType,
   UserInterventionConfigSchema,
@@ -1366,6 +1367,8 @@ const ExecAgentSchema = z
      * so tool calls auto-execute without waiting for human approval.
      */
     userInterventionConfig: UserInterventionConfigSchema.optional(),
+    /** Selected context for the user message this run creates. */
+    userMessageMetadata: SendUserMessageMetadataSchema.optional(),
   })
   .refine((data) => data.agentId || data.slug, {
     message: 'Either agentId or slug must be provided',
@@ -2542,6 +2545,7 @@ export const aiAgentRouter = router({
       steer,
       trigger,
       userInterventionConfig,
+      userMessageMetadata,
     } = input;
 
     log('execAgent: identifier=%s, prompt=%s', agentId || slug, prompt.slice(0, 50));
@@ -2677,6 +2681,7 @@ export const aiAgentRouter = router({
         trigger: trigger ?? RequestTrigger.Chat,
         userAgent: ctx.userAgent ?? undefined,
         userInterventionConfig,
+        userMessageMetadata,
       });
       // The run was dispatched but it did not take the Task's run row over. Two
       // ways that happens: the Task was retired while the run was starting (the

@@ -7,6 +7,7 @@ import type {
   ExternalOriginMetadata,
   LobeAgentChatConfig,
   RuntimeMentionedAgent,
+  SendUserMessageMetadata,
   UserInterventionConfig,
   WorkingDirConfig,
   WorkspaceInitResult,
@@ -330,6 +331,11 @@ export interface InternalExecAgentParams extends ExecAgentParams {
    * Use { approvalMode: 'headless' } for async tasks that should never wait for human approval
    */
   userInterventionConfig?: UserInterventionConfig;
+  /**
+   * Client-selected context for the user message this run creates (page / code
+   * selections, desktop local-file snapshots), persisted on that row.
+   */
+  userMessageMetadata?: SendUserMessageMetadata;
 }
 
 /**

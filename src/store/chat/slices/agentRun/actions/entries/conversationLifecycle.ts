@@ -1900,6 +1900,20 @@ export class ConversationLifecycleActionImpl {
 
     // ── Gateway: skip sendMessageInServer, let execAgentTask handle everything ──
     if (!directMentionRoute) {
+      const gatewayRequestMetadataFields = {
+        ...requestMetadata,
+        ...((metadata as Pick<MessageMetadata, 'steer'> | undefined)?.steer && {
+          steer: true as const,
+        }),
+        ...(contextSelections?.length && { contextSelections }),
+        ...(pageSelections?.length && { pageSelections }),
+        ...(localSystemToolSnapshots.length && { localSystemToolSnapshots }),
+      };
+      const gatewayRequestMetadata =
+        Object.keys(gatewayRequestMetadataFields).length > 0
+          ? gatewayRequestMetadataFields
+          : undefined;
+
       try {
         // Pass `sendMessage` as `parentOperationId` so executeGatewayAgent
         // completes it the instant phase-1 init finishes (after the child
@@ -1927,10 +1941,9 @@ export class ConversationLifecycleActionImpl {
           fileIds: fileIdList,
           message: persistedContent,
           // The server persists the user row on this path, so a queued
-          // follow-up's steer mark must travel with the request.
-          metadata: (metadata as Pick<MessageMetadata, 'steer'> | undefined)?.steer
-            ? { ...requestMetadata, steer: true }
-            : requestMetadata,
+          // follow-up's steer mark and the selected page / code context and
+          // local-file snapshots must travel with the request.
+          metadata: gatewayRequestMetadata,
           onMessageAccepted: notifyMessageAccepted,
           onTopicCreated: context.isolatedTopic ? onTopicCreated : undefined,
           parentOperationId: operationId,

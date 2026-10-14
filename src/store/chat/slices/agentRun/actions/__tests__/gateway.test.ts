@@ -1986,6 +1986,37 @@ describe('GatewayActionImpl', () => {
       );
     });
 
+    // Regression: the server-created user row lost the selected page context.
+    it('should forward selected page context as userMessageMetadata', async () => {
+      const { action } = createExecuteTestAction();
+      const pageSelections = [{ content: 'x', id: 's1', pageId: 'p1', xml: '<p>x</p>' }] as any;
+      vi.mocked(aiAgentService.execAgentTask).mockResolvedValue({
+        agentId: 'agent-1',
+        autoStarted: true,
+        createdAt: new Date().toISOString(),
+        message: 'ok',
+        operationId: 'server-op-2',
+        status: 'created',
+        success: true,
+        timestamp: new Date().toISOString(),
+        token: 'test-token',
+        topicId: 'topic-1',
+        userMessageId: 'usr-2',
+      });
+
+      await action.executeGatewayAgent({
+        context: { agentId: 'agent-1', topicId: 'topic-1', threadId: null, scope: 'main' },
+        message: 'Explain this',
+        metadata: { pageSelections },
+      });
+
+      expect(aiAgentService.execAgentTask).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userMessageMetadata: expect.objectContaining({ pageSelections }),
+        }),
+      );
+    });
+
     it('should forward current user intervention config to execAgentTask', async () => {
       const { action } = createExecuteTestAction();
       mockToolInterventionConfig.approvalMode = 'allow-list';

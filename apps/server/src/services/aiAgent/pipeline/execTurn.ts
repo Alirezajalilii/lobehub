@@ -117,6 +117,7 @@ export const execAgentTurn = async (
     title,
     steer,
     trigger,
+    userMessageMetadata,
     cronJobId,
     taskId,
     evalContext,
@@ -417,6 +418,7 @@ export const execAgentTurn = async (
         throwIfExecutionAborted,
         title,
         trigger,
+        userMessageMetadata,
       },
     ),
   );

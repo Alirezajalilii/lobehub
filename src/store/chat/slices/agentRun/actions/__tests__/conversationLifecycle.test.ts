@@ -1504,6 +1504,28 @@ describe('ConversationLifecycle actions', () => {
         expect(message).toContain('identifier="user_memory"');
       });
 
+      // Regression: the gateway request only carried steer/trigger, so the
+      // server-created user row lost the selected page context.
+      it('should send selected page context with the gateway run metadata', async () => {
+        const { result } = renderHook(() => useChatStore());
+        const executeGatewayAgent = mockGatewayAgent();
+        const pageSelections = [
+          { content: 'picked text', id: 'sel-1', pageId: 'page-1', xml: '<p>picked text</p>' },
+        ] as any;
+
+        await act(async () => {
+          await result.current.sendMessage({
+            context: createTestContext(),
+            message: TEST_CONTENT.USER_MESSAGE,
+            pageSelections,
+          });
+        });
+
+        expect(executeGatewayAgent).toHaveBeenCalledWith(
+          expect.objectContaining({ metadata: expect.objectContaining({ pageSelections }) }),
+        );
+      });
+
       it('should work when sending from home page (activeAgentId is empty but context.agentId exists)', async () => {
         const { result } = renderHook(() => useChatStore());
 
