@@ -518,6 +518,17 @@ export default {
   'heterogeneousStatus.cloud.tokenLabel': 'Claude Code Token',
   'heterogeneousStatus.cloud.tokenDesc':
     'Your Claude Code OAuth token. Saved securely to Credentials once submitted. Run `claude setup-token` in your terminal to generate one.',
+  'heterogeneousStatus.cloud.tokenLookupError':
+    "Couldn't check whether this token is available here. Retry to load it again.",
+  'heterogeneousStatus.cloud.tokenRetry': 'Retry',
+  'heterogeneousStatus.cloud.tokenSharedElsewhere':
+    'Your personal Claude Code token is shared to another workspace. Saving a token here moves it to this workspace, and cloud runs in the other workspace will no longer be able to use it.',
+  'heterogeneousStatus.cloud.tokenTypeMismatch':
+    'A credential with the key CLAUDE_CODE_OAUTH_TOKEN already exists with a different type. Remove or rename it in Credentials, then save again.',
+  'heterogeneousStatus.cloud.tokenNotShared':
+    'Your personal Claude Code token is not shared to this workspace, so cloud runs here cannot use it. Save a token to share it to this workspace.',
+  'heterogeneousStatus.cloud.tokenSaveError':
+    'Failed to save the Claude Code token. Please try again.',
   'heterogeneousStatus.cloud.tokenPlaceholder': 'Paste your OAuth token here',
   'heterogeneousStatus.cloud.tokenChange': 'Change',
   'heterogeneousStatus.cloud.tokenSave': 'Save',
@@ -659,6 +670,14 @@ export default {
   'devices.channel.connected': 'Connected {{time}}',
   'devices.channel.unknown': 'Unknown client',
   'devices.currentBadge': 'This device',
+  'devices.activity.boundAgents.empty': 'No agents are set to run on this device',
+  'devices.activity.boundAgents.open': 'Open agent',
+  'devices.activity.boundAgents.title': 'Bound agents',
+  'devices.activity.error': "Couldn't load this device's activity",
+  'devices.activity.loading': 'Loading…',
+  'devices.activity.runningTopics.empty': 'Nothing is running on this device right now',
+  'devices.activity.runningTopics.open': 'Open topic',
+  'devices.activity.runningTopics.title': 'Running topics',
   'devices.agents.empty': 'No agents found on this device',
   'devices.agents.error': 'Could not check this device: {{error}}',
   'devices.agents.installed': 'Installed',
@@ -707,6 +726,7 @@ export default {
   'devices.card.cpuUsage': 'CPU usage',
   'devices.card.hostname': 'Hostname',
   'devices.card.memoryUsage': 'Memory usage',
+  'devices.card.runningTopics': 'Running topics',
   'devices.card.workingDir': 'Working directory',
   'devices.connectWizard.button': 'Connect Device',
   'devices.connectWizard.cli.connectDesc':
@@ -740,6 +760,8 @@ export default {
     'Download the desktop app, sign in, and your device connects automatically.',
   'devices.empty.methodDesktop.title': 'Connect via Desktop',
   'devices.empty.title': 'Connect your first device',
+  'devices.errors.boundToFixedAgent':
+    "This device is set as the fixed run device for one or more workspace agents. Change those agents' run device settings first.",
   'devices.fallbackBadge': 'Unstable identity',
   'devices.fallbackTooltip':
     "This device couldn't be identified by its machine ID, so reinstalling the app may create a duplicate entry.",
@@ -983,6 +1005,7 @@ export default {
   'notification.category.workspace.title': 'Workspace',
   'notification.item.agent_cron_job_completed': 'Scheduled task completed',
   'notification.item.agent_cron_job_failed': 'Scheduled task failed',
+  'notification.item.agent_task_run_failed': 'Task failed',
   'notification.item.agent_run_completed': 'Agent task completed',
   'notification.item.agent_transfer_result': 'Transfer request result',
   'notification.item.checkout_abandoned': 'Unfinished checkout reminders',
@@ -3516,6 +3539,72 @@ When I am ___, I need ___
     'Your plan includes {{includedSeats}} free seats, expandable up to {{maxSeats}} with purchased extras.',
   'workspace.onboarding.step4Invite.subtitleWithLimit':
     'Free includes up to {{maxSeats}} seats, including you.',
+  'workspace.onboarding.flow.summary.maxSeats': 'Up to {{count}} members',
+  'workspace.onboarding.flow.welcome.title': 'Welcome to {{name}} 👋',
+  'workspace.onboarding.flow.welcome.description':
+    "I'm your team's agent steward. In the next few steps we'll connect your work apps, hire a team assistant and invite members, so agents become part of how your team works.",
+  'workspace.onboarding.flow.welcome.adminOnly':
+    'Only admins see this setup. Members who join later use the configured workspace right away.',
+  'workspace.onboarding.flow.connectApps.title': "Connect your team's work apps",
+  'workspace.onboarding.flow.connectApps.description':
+    'Connect the apps your team uses so the assistant can learn its projects and who does what. Authorization applies to the whole workspace.',
+  'workspace.onboarding.flow.connectApps.skip': 'Skip for now, connect later',
+  'workspace.onboarding.flow.connectApps.more':
+    'You can connect more apps anytime in Settings → Connectors.',
+  'workspace.onboarding.flow.learnYourTeam.title': 'Get to know your team',
+  'workspace.onboarding.flow.learnYourTeam.description': 'Building your team profile',
+  'workspace.onboarding.flow.learnYourTeam.hint':
+    '💡 You can skip ahead; the analysis keeps running in the background',
+  'workspace.onboarding.flow.learnYourTeam.error':
+    "Couldn't finish the team analysis. Retry or skip for now.",
+  'workspace.onboarding.flow.learnYourTeam.progress.review':
+    'Reading team data from connected apps',
+  'workspace.onboarding.flow.learnYourTeam.progress.build':
+    "Mapping the team's projects, roles and ways of working",
+  'workspace.onboarding.flow.learnYourTeam.progress.explore':
+    'Writing the team profile and first task ideas',
+  'workspace.onboarding.flow.teamProfile.title': 'Team profile',
+  'workspace.onboarding.flow.teamProfile.empty':
+    'No team profile yet. Add team details, or go back to run the analysis again.',
+  'workspace.onboarding.flow.teamProfile.supplementLabel': '**Added by an admin:** {{text}}',
+  'workspace.onboarding.flow.teamProfile.supplement.title': 'Add team details',
+  'workspace.onboarding.flow.teamProfile.supplement.description':
+    "Add the team's business, current projects or ways of working to help the assistant understand the team. Every member can see this profile.",
+  'workspace.onboarding.flow.teamProfile.supplement.placeholder':
+    "For example: we're an 8-person product team building B2B SaaS, shipping every two weeks.",
+  'workspace.onboarding.flow.teamProfile.supplement.cancel': 'Cancel',
+  'workspace.onboarding.flow.teamProfile.supplement.save': 'Update profile',
+  'workspace.onboarding.flow.teamProfile.supplement.saveFailed': "Couldn't save. Please try again.",
+  'workspace.onboarding.flow.assistant.hint':
+    '💡 This assistant is shared by the whole team. Members can @ it in chats and group chats.',
+  'workspace.onboarding.flow.invite.quote': 'Bring your teammates in,',
+  'workspace.onboarding.flow.invite.highlight': 'and I can start helping everyone.',
+  'workspace.onboarding.flow.invite.send_one': 'Invite {{count}} member',
+  'workspace.onboarding.flow.invite.send_other': 'Invite {{count}} members',
+  'workspace.onboarding.flow.invite.skip': 'Skip for now, invite later',
+  'workspace.onboarding.flow.invite.invalidEmails': 'Invalid email address: {{emails}}',
+  'workspace.onboarding.flow.starterTasks.title': "Your team's first tasks",
+  'workspace.onboarding.flow.starterTasks.description':
+    'Hand these tasks to the team assistant and watch it work through them in the workspace.',
+  'workspace.onboarding.flow.starterTasks.quote': "I'll suggest a few tasks",
+  'workspace.onboarding.flow.starterTasks.highlight': 'to save your team repetitive sync work.',
+  'workspace.onboarding.flow.starterTasks.empty':
+    'No suggested tasks yet. You can finish setup now.',
+  'workspace.onboarding.flow.starterTasks.addFailed': "Couldn't add the tasks. Please try again.",
+  'workspace.onboarding.flow.channels.title': "Bring the assistant into your team's chats",
+  'workspace.onboarding.flow.channels.description':
+    'Connect a bot your team owns to {{name}}. Everyone in the group can @{{name}} to hand off work — nobody has to link an account.',
+  'workspace.onboarding.flow.channels.quote': "Add me to your team's group chats,",
+  'workspace.onboarding.flow.channels.highlight': 'and anyone can hand me work.',
+  'workspace.onboarding.flow.channels.more': 'You can change channels anytime in Agent → Channels.',
+  'workspace.onboarding.flow.channels.configTitle': 'Connect {{platform}}',
+  'workspace.onboarding.flow.devices.title': 'Connect team devices',
+  'workspace.onboarding.flow.devices.subtitle':
+    'Enroll the team’s computers so the assistant can use Claude Code, Codex and other local agents on them.',
+  'workspace.onboarding.flow.devices.connect': 'Connect device',
+  'workspace.onboarding.flow.devices.count': '{{online}} of {{count}} online',
+  'workspace.onboarding.flow.devices.empty':
+    'No team devices yet. Install the desktop app or run lh connect on a team computer to add one.',
   'workspace.onboarding.step4.heading': '{{name}} is ready!',
   'workspace.onboarding.step4.subtitle':
     'Your workspace is set up. Jump in and start collaborating with your team.',
@@ -4036,7 +4125,7 @@ When I am ___, I need ___
   'tools.title': 'Skills',
   'tab.environments': 'Environments',
   'environments.desc':
-    'What a sandbox run needs around it: a repository, its setup, its variables. Each instance built from one keeps its own files between sessions.',
+    'What a sandbox run needs around it: a repository, its setup, its variables. Each copy built from one keeps its own files between sessions.',
   'environments.create': 'New environment',
   'environments.cancel': 'Cancel',
   'environments.createFailed': 'Could not create the environment',
@@ -4044,22 +4133,22 @@ When I am ___, I need ___
   'environments.empty': 'No environments yet',
   'environments.removeFailed': 'Could not delete this environment',
   'environments.saveFailed': 'Could not save this change',
-  'environments.instances.removeFailed': 'Could not delete this instance',
+  'environments.instances.removeFailed': 'Could not delete this copy',
   'environments.instances.removing': 'Deleting — removing its folder and everything in it',
-  'environments.instances.removeConfirmTitle': 'Delete instance {{name}}?',
+  'environments.instances.removeConfirmTitle': 'Delete copy {{name}}?',
   'environments.instances.removeConfirmContent':
     'Its folder and everything it kept — installed packages, reports, data — will be deleted. This cannot be undone.',
   'environments.remove': 'Delete environment',
   'environments.removeConfirmTitle': 'Delete environment {{name}}?',
   'environments.removeConfirmContent':
-    'Its specification, variables and saved snapshot go with it, and cannot be recovered.',
+    "Its specification, variables, its copy's folder and the saved snapshot go with it, and cannot be recovered.",
   'environments.storage.used': '{{used}} of {{total}}',
   'environments.storage.unmeasured': 'Storage not measured yet · {{total}} available',
   'environments.storage.measuredAt': 'Measured {{time}}. Refresh to measure again.',
   'environments.storage.over':
     'Over the storage limit. Saving a file is refused until you delete something.',
   'environments.duplicateName': 'You already have an environment with this name',
-  'environments.hasInstances': 'Remove its instances first',
+  'environments.hasInstances': 'Remove its other copies first',
   'environments.loadFailed.title': 'Could not check your plan',
   'environments.loadFailed.desc':
     'We could not reach the service that says whether this account has a persistent workspace. Nothing is wrong with your environments.',
@@ -4069,7 +4158,7 @@ When I am ___, I need ___
     'Environments describe a persistent cloud workspace, and this deployment does not provide one.',
   'environments.upgrade.title': 'Upgrade to Pro to unlock sandbox environments',
   'environments.upgrade.desc':
-    'Give cloud-sandbox runs a persistent working directory. An environment describes what the sandbox needs — repositories, setup, variables — and its instances keep everything between sessions.',
+    'Give cloud-sandbox runs a persistent working directory. An environment describes what the sandbox needs — repositories, setup, variables — and its copies keep everything between sessions.',
   'environments.upgrade.cta': 'Upgrade to Pro',
   'environments.upgrade.benefits.environments.title': 'Sandbox setup written once',
   'environments.upgrade.benefits.environments.desc':
@@ -4077,9 +4166,9 @@ When I am ___, I need ___
   'environments.upgrade.benefits.persist.title': 'Files survive the sandbox',
   'environments.upgrade.benefits.persist.desc':
     'The working directory is kept when the sandbox is recycled; the next run continues where the last stopped.',
-  'environments.upgrade.benefits.instances.title': 'One instance per task',
+  'environments.upgrade.benefits.instances.title': 'One copy per task',
   'environments.upgrade.benefits.instances.desc':
-    'Parallel conversations each run in their own instance of the environment, so nothing overwrites anything else.',
+    'Parallel conversations each run in their own copy of the environment, so nothing overwrites anything else.',
   'environments.github.label': 'Repository',
   'environments.github.notConnected':
     'No GitHub connection yet — connect one to build an environment from a repository',
@@ -4093,7 +4182,7 @@ When I am ___, I need ___
   'environments.github.noRepositories': 'This connection cannot see any repositories yet',
   'environments.github.connect': 'Connect GitHub',
   'environments.github.reviewAccess': 'Review access',
-  'environments.instances.create': 'New instance',
+  'environments.instances.create': 'New copy',
   'environments.form.description': 'Description',
   'environments.form.descriptionPlaceholder': 'What this environment is for',
   'environments.form.sources': 'Source code',
@@ -4109,7 +4198,7 @@ When I am ___, I need ___
     'Runs once in the checkout, with network access, before the conversation starts.',
   'environments.form.env': 'Environment variables',
   'environments.form.envHint':
-    'Non-secret values only — these are stored as plain text and copied into every instance.',
+    'Non-secret values only — these are stored as plain text and copied into every copy of this environment.',
   'environments.form.addEnv': 'New variable',
   'environments.form.envCount_one': '{{count}} variable',
   'environments.form.envCount_other': '{{count}} variables',
@@ -4127,38 +4216,58 @@ When I am ___, I need ___
   'environments.form.editEnv': 'Edit variable',
   'environments.form.changeRepository': 'Change repository',
   'environments.form.disconnect': 'Disconnect',
-  'environments.instances.title': 'Instances',
+  'environments.detail.tabs.overview': 'Overview',
+  'environments.instances.copy': 'Duplicate copy',
+  'environments.instances.copyTitle': 'Duplicate {{name}}',
+  'environments.instances.copyFailed': 'Could not duplicate this copy',
+  'environments.instances.copyInUse':
+    'A conversation is using this copy, so it cannot be duplicated now — duplicate it once that run ends, or stop the run first',
+  'environments.instances.copyOccupancyUnknown':
+    'Could not check whether this copy is in use, so it cannot be duplicated right now',
+  'environments.instances.copyBuilding':
+    'This copy is being built, so it cannot be duplicated until the build finishes',
+  'environments.instances.title': 'Copies',
   'environments.instances.desc':
-    'An instance is a working copy of this environment, with its own folder and its own installed packages. Conversations run inside an instance, and several can run side by side without touching each other.',
-  'environments.instances.empty': 'No instances yet',
+    'A copy is a working copy of this environment, with its own folder and its own installed packages. Conversations run inside a copy, and several can run side by side without touching each other.',
+  'environments.instances.empty': 'No copies yet',
   'environments.instances.emptyHint':
     'Create one, then pick it under "Working Directory" in the chat input.',
   'environments.instances.emptyReadonly':
-    'Nobody has created an instance of this environment yet. Only its owner can add one.',
-  'environments.instances.count_one': '{{count}} instance',
-  'environments.instances.count_other': '{{count}} instances',
-  'environments.instances.add': 'New instance',
-  'environments.instances.namePlaceholder': 'Instance name',
+    'Nobody has created a copy of this environment yet. Only its owner can add one.',
+  'environments.instances.count_one': '{{count}} copy',
+  'environments.instances.count_other': '{{count}} copies',
+  'environments.instances.add': 'New copy',
+  'environments.instances.namePlaceholder': 'Copy name',
   // One line, because the field fills itself in from the name: almost nobody
   // has a decision to make here, and a paragraph over a solved field reads as
   // a warning that something is about to go wrong.
   'environments.instances.directoryHint': 'Folder path. Cannot be changed once created.',
   'environments.sessions.stale': 'No end recorded',
-  'environments.instances.remove': 'Delete instance',
-  'environments.instances.rename': 'Rename instance',
-  'environments.instances.renameFailed': 'Could not rename this instance',
+  'environments.instances.remove': 'Delete copy',
+  'environments.instances.rename': 'Rename copy',
+  'environments.instances.renameFailed': 'Could not rename this copy',
   'environments.instances.directoryLocked':
-    'The folder cannot be changed after the instance is built — delete it and create another to move it.',
-  'environments.instances.duplicateDirectory': 'Another instance already uses this folder',
+    'The folder cannot be changed after the copy is built — delete it and create another to move it.',
+  'environments.instances.duplicateDirectory': 'Another copy already uses this folder',
   'environments.instances.overlappingDirectory':
-    "This folder is inside another instance's folder, or contains one",
-  'environments.instances.createFailed': 'Could not create the instance',
+    "This folder is inside another copy's folder, or contains one",
+  'environments.instances.createFailed': 'Could not create the copy',
   'environments.form.maintenance': 'Maintenance command',
   'environments.form.maintenanceHint':
-    'Runs each time work resumes in an instance — refreshing a checkout, reapplying a migration. Not the setup command again: that one is expensive and is meant to run once.',
+    'Runs each time work resumes in a copy — refreshing a checkout, reapplying a migration. Not the setup command again: that one is expensive and is meant to run once.',
   'environments.form.exclude': 'Regenerable paths',
   'environments.form.excludeHint':
     'One per line, relative to the copy. Listing a path says it can be rebuilt, so it is kept apart from your work and may be discarded to reclaim space. Anything named here that cannot be rebuilt is work you can lose.',
+  'environments.form.filesDesc': 'What this folder is called and what it holds for the agent.',
+  'environments.kind.code': 'Code',
+  'environments.kind.codeDesc':
+    'Clone a repository, set variables and run setup before the agent starts.',
+  'environments.kind.files': 'Files',
+  'environments.kind.filesDesc':
+    'Upload files for an agent to work on. Ready as soon as it is created.',
+  'environments.kind.filesHint':
+    'A folder you upload files to for an agent to work on. Nothing is cloned or installed, so there is no build — it is ready the moment it is created.',
+  'environments.kind.label': 'Type',
   'environments.meta.creatorTooltip': 'Created by {{name}}',
   'environments.meta.unknownCreator': 'Unknown',
   'environments.meta.createdAt': 'Created {{time}}',
@@ -4167,12 +4276,12 @@ When I am ___, I need ___
   'environments.detail.tabs.settings': 'Settings',
   'environments.sessions.title': 'Run history',
   'environments.sessions.desc':
-    'The most recent sessions that ran in these instances and the builds of them, newest first, with how each ended and whether what it installed was saved.',
+    'The most recent sessions that ran in these copies and the builds of them, newest first, with how each ended and whether what it installed was saved.',
   'environments.sessions.empty': 'Nothing has run here yet',
   'environments.sessions.emptyHint':
-    'Every conversation and build in one of its instances will show up here.',
+    'Every conversation and build in this environment will show up here.',
   'environments.sessions.unavailable':
-    'Part of the history could not be read — some instances are missing from this list',
+    'Part of the history could not be read — some copies are missing from this list',
   'environments.sessions.running': 'Running',
   'environments.sessions.activeSession': 'A sandbox is running in {{instance}} right now',
   'environments.sessions.activeBuild': '{{instance}} is being built right now',
@@ -4194,9 +4303,9 @@ When I am ___, I need ___
   'environments.sessions.reason.build_timeout': 'Build timed out',
   'environments.sessions.reason.build_gone': 'Build interrupted',
   'environments.form.desc':
-    'What an instance is built from — where the code comes from and what makes it usable.',
+    'What a copy is built from — where the code comes from and what makes it usable.',
   'environments.form.appliesOnBuild':
-    'Applied when an instance is created. Existing instances keep the definition they were made with — a rebuild replays that one, so use a new instance to pick this up.',
+    'Applied when a copy is created. Existing copies keep the definition they were made with — a rebuild replays that one, so use a new copy to pick this up.',
   'environments.refresh': 'Refresh',
   'environments.emptyPublished': 'Nothing published to this workspace yet',
   'environments.visibility.tabs.workspace': 'Workspace',
@@ -4215,7 +4324,7 @@ When I am ___, I need ___
   'environments.files.binary': 'Not a text file, so it cannot be shown here.',
   'environments.files.unreadable': 'This file could not be read',
   'environments.files.listFailed': 'This directory could not be listed',
-  'environments.files.invalidPath': "The name has to stay inside this instance's directory",
+  'environments.files.invalidPath': "The name has to stay inside this copy's directory",
   'environments.files.truncated': 'Only the first entries are shown',
   'environments.mine': 'My environments',
   'environments.form.basics': 'Basics',
@@ -4232,23 +4341,27 @@ When I am ___, I need ___
   'environments.instances.buildFailed': 'Build failed',
   'environments.instances.rebuild': 'Rebuild',
   'environments.instances.build': 'Build',
-  'environments.instances.buildConfirmTitle': 'Build instance {{name}}?',
+  'environments.instances.buildConfirmTitle': 'Build copy {{name}}?',
   'environments.instances.buildStartFailed': 'Could not start the build',
   // Context-free on purpose: the same code refuses a rebuild and a delete, so
   // a sentence that only mentions rebuilding was wrong half the time.
   'environments.instances.running': 'Running',
   'environments.instances.occupancyUnavailable':
-    'Could not read which instances are running right now',
+    'Could not read which copies are running right now',
   'environments.instances.inUse':
-    'A conversation is using this instance — try again once that run ends',
+    'A conversation is using this copy — try again once that run ends',
+  // The default copy is what the environment is, so it goes with the
+  // environment; a broken one is rebuilt, not deleted on its own.
+  'environments.instances.defaultUndeletable':
+    "This is the environment's default copy and can't be deleted on its own — rebuild it, or delete the environment",
   'environments.instances.runningHint':
-    'A run is still using this instance — a conversation, a build, or the file browser. It is released on its own roughly 15 minutes after that run goes quiet; Run history shows which one is holding it.',
+    'A run is still using this copy — a conversation, a build, or the file browser. It is released on its own roughly 15 minutes after that run goes quiet; Run history shows which one is holding it.',
   'environments.instances.runningHintStoppable':
-    'A run is still using this instance — a conversation, a build, or the file browser. It is released on its own roughly 15 minutes after that run goes quiet, or you can stop it now; Run history shows which one is holding it.',
+    'A run is still using this copy — a conversation, a build, or the file browser. It is released on its own roughly 15 minutes after that run goes quiet, or you can stop it now; Run history shows which one is holding it.',
   'environments.instances.stop': 'Stop',
   'environments.instances.stopConfirmTitle': 'Stop the run in "{{name}}"?',
   'environments.instances.stopConfirmContent':
-    'The run holding this instance is stopped now instead of when it goes quiet. What it installed and wrote is saved first. A conversation in the middle of a step has that step cut off, and picks up from the saved state with its next message.',
+    'The run holding this copy is stopped now instead of when it goes quiet. What it installed and wrote is saved first. A conversation in the middle of a step has that step cut off, and picks up from the saved state with its next message.',
   'environments.instances.stopping': 'Stopping — saving the run first…',
   'environments.instances.stopped': 'Stopped. "{{name}}" is free to use',
   'environments.instances.stopNothing': 'Nothing is running in "{{name}}" any more',
@@ -4256,16 +4369,16 @@ When I am ___, I need ___
   'environments.instances.stopSnapshotPending':
     'The run is still saving its work, so it was left running — try again in a moment',
   'environments.instances.stopStarting':
-    'A run is just starting in this instance — try again in a moment',
+    'A run is just starting in this copy — try again in a moment',
   'environments.instances.stopBusy':
-    'This instance is being copied or deleted — try again in a moment',
+    'This copy is being duplicated or deleted — try again in a moment',
   'environments.instances.stopBuilding':
-    'This instance is being built. It is released when the build finishes',
+    'This copy is being built. It is released when the build finishes',
   'environments.instances.stopRefused': 'The run could not be stopped — try again',
   'environments.instances.notBuilt': 'Not built yet — nothing has been cloned or installed',
   'environments.instances.rebuildConfirmContent':
-    "This clears the instance's folder, then clones the code again and runs the setup script. Everything in it now — changes made in conversations, installed packages, reports, data — will be lost. This cannot be undone.",
-  'environments.instances.rebuildConfirmTitle': 'Rebuild instance {{name}}?',
+    "This clears the copy's folder, then clones the code again and runs the setup script. Everything in it now — changes made in conversations, installed packages, reports, data — will be lost. This cannot be undone.",
+  'environments.instances.rebuildConfirmTitle': 'Rebuild copy {{name}}?',
   'environments.instances.showLog': 'Show log',
   'environments.instances.hideLog': 'Hide log',
   'environments.instances.directoryLabel': 'Directory',
@@ -4274,5 +4387,5 @@ When I am ___, I need ___
     'Read-only: kept in sync by the sandbox. Dependencies such as node_modules are not shown.',
   'environments.files.openHint': 'Double-click a folder to open it, or a file to view it',
   'environments.files.unusedInstance':
-    'Nothing here yet. The code appears once the instance is built or a conversation runs in it.',
+    'Nothing here yet. The code appears once the copy is built or a conversation runs in it.',
 };

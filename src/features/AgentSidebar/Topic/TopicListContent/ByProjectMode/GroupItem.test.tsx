@@ -1,7 +1,7 @@
 /**
  * @vitest-environment happy-dom
  */
-import { AccordionRoot } from '@lobehub/ui/base-ui';
+import { AccordionRoot } from '@lobehub/ui';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -82,8 +82,9 @@ vi.mock('@/helpers/agentWorkingDirectory', () => ({
   resolveTargetDeviceId: () => 'device-1',
 }));
 
+const openBindDirectoryModalMock = vi.hoisted(() => vi.fn());
 vi.mock('@/features/Projects/WorkingDirectories/BindDirectoryModal', () => ({
-  openBindDirectoryModal: vi.fn(),
+  openBindDirectoryModal: openBindDirectoryModalMock,
 }));
 
 const openProjectTopicModalMock = vi.hoisted(() => vi.fn());
@@ -95,7 +96,7 @@ vi.mock('react-router', () => ({
   useParams: () => routeParamsMock,
 }));
 
-vi.mock('@lobehub/ui/base-ui', async (importOriginal) => ({
+vi.mock('@lobehub/ui', async (importOriginal) => ({
   ...(await importOriginal<object>()),
   ...(await import('~base-ui-stubs')).baseUiStubs,
 }));
@@ -454,7 +455,7 @@ describe('Project topic group item', () => {
     expect(routerPushMock).toHaveBeenCalled();
   });
 
-  it('opens the new-topic composer for the project directory without creating a topic', async () => {
+  it('opens a path-only composer from a path group even when a project registered that path', async () => {
     // The group "+" must not persist anything: it opens the composer, and the
     // topic is created once the user sends the first message. Regression for
     // the straight-to-server start that dropped an empty "untitled" topic into
@@ -489,12 +490,49 @@ describe('Project topic group item', () => {
     expect(switchTopicMock).toHaveBeenCalledWith(null, { skipRefreshMessage: true });
     expect(routerPushMock).toHaveBeenCalledWith('/agent/agent-1');
     expect(startTopicMock).not.toHaveBeenCalled();
-    // The deferred row must still be born inside the project: the staged
-    // directory rides along to the first-message creation.
-    expect(setPendingNewTopicDirectoryMock).toHaveBeenCalledWith({
-      agentId: 'agent-1',
-      projectWorkingDirectoryId: 'binding-1',
+    // A plain path group stays path-only: a project directory registered at
+    // the same path must not pull the new topic into that project.
+    expect(setPendingNewTopicDirectoryMock).toHaveBeenCalledWith(undefined);
+  });
+
+  it('offers binding a path group even when a project registered that path', async () => {
+    directoryRows.push({
+      deviceId: 'device-1',
+      id: 'binding-1',
+      path: '/Users/me/project',
+      projectAvatar: '',
+      projectId: 'prj-1',
+      projectName: 'LobeHub',
+      projectSlug: 'lobehub',
     });
+    openBindDirectoryModalMock.mockReset();
+
+    render(
+      <AccordionRoot>
+        <GroupItem
+          expanded
+          group={{
+            children: [
+              { id: 't1', metadata: { workingDirectory: '/Users/me/project' }, title: 'Loose' },
+            ] as any,
+            id: 'project:/Users/me/project',
+            title: 'project',
+          }}
+        />
+      </AccordionRoot>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'directories.projectBinding' }));
+    expect(screen.queryByText('topics.viewProject')).toBeNull();
+    fireEvent.click(await screen.findByText('directories.bind'));
+
+    expect(openBindDirectoryModalMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        deviceId: 'device-1',
+        path: '/Users/me/project',
+        topicIds: ['t1'],
+      }),
+    );
   });
 
   it('preserves the detected route prefix when adding a project topic without an active workspace slug', async () => {

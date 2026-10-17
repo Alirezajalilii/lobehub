@@ -1,18 +1,19 @@
 import type { ConversationContext, UIChatMessage } from '@lobechat/types';
 
+import { IndexedDBQueryProjectionStorage } from '@/libs/queryProjectionStorage';
 import {
   defineReplica,
+  REPLICA_INDEX_KEY,
   type ReplicaPagedData,
   type ReplicaPageResult,
   type ReplicaPagingConfig,
-  ReplicaWriteQueue,
+  type ReplicaRow,
+  type ReplicaRowKey,
+  type ReplicaStorage,
 } from '@/libs/replica';
 import { normalizeMessageListQueryContext } from '@/libs/swr/keys';
-import {
-  getMessageListWindowOlderCursor,
-  messageListKey,
-  type MessageRoundCursor,
-} from '@/services/message/cache';
+import type { MessageService } from '@/services/message';
+import { messageListKey, type MessageRoundCursor } from '@/services/message/cache';
 import { isLocalOnlyMessage } from '@/store/chat/utils/localMessages';
 import { messageMapKey } from '@/store/chat/utils/messageMapKey';
 
@@ -47,15 +48,22 @@ const isSyntheticGroupNode = (message: UIChatMessage) =>
 const isPersistableContext = (context: ConversationContext) => {
   if (!context.agentId || !context.topicId) return false;
   if (context.agentShareId || context.topicShareId) return false;
-  const canonical = messageMapKey({
-    agentId: context.agentId,
-    groupId: context.groupId,
+  return messageMapKey(context) === canonicalBucketOf(context);
+};
+
+const canonicalBucketOf = (context: {
+  agentId?: string | null;
+  groupId?: string | null;
+  threadId?: string | null;
+  topicId?: string | null;
+}) =>
+  messageMapKey({
+    agentId: context.agentId ?? '',
+    groupId: context.groupId ?? undefined,
     scope: context.threadId ? 'thread' : context.groupId ? 'group' : 'main',
     threadId: context.threadId,
     topicId: context.topicId,
   });
-  return messageMapKey(context) === canonical;
-};
 
 /**
  * Entry identity of a conversation. Persistable conversations key by the
@@ -66,7 +74,18 @@ const isPersistableContext = (context: ConversationContext) => {
 export const conversationMessagesKey = (context: ConversationContext) =>
   isPersistableContext(context)
     ? `p:${JSON.stringify(normalizeMessageListQueryContext(context))}`
-    : `m:${messageMapKey(context)}`;
+    : `m:${JSON.stringify({ bucket: messageMapKey(context), threadId: context.threadId ?? null })}`;
+
+/**
+ * The chat store bucket (`messageMapKey`) an entry key renders into, and the
+ * thread its rows are parsed for. Every key is built by
+ * {@link conversationMessagesKey}, so both are recoverable from it.
+ */
+export const transcriptBucketOf = (key: string): { bucket: string; threadId: string | null } => {
+  const value = JSON.parse(key.slice(2));
+  if (key.startsWith('p:')) return { bucket: canonicalBucketOf(value), threadId: value.threadId };
+  return value;
+};
 
 const transcriptPaging: ReplicaPagingConfig<UIChatMessage, MessageRoundCursor> = {
   // Only reached for read paths without round cursors (threads, shared
@@ -117,60 +136,83 @@ export const transcriptOf = (items: UIChatMessage[]): ConversationMessagePage =>
   pageSize: items.length,
 });
 
+// ---- tool result payloads ------------------------------------------------
+
 /**
- * The transcript persisted for a conversation, read without a store — for the
- * route loader, which runs before any Conversation store exists. `undefined`
- * when the conversation is kept in memory only or nothing is stored.
+ * The stored body of one tool message the conversation read projected away
+ * (`payloadOmitted`), fetched back when the user opens the card. `value` is
+ * wrapped so an answered-but-empty payload still replaces a stale row.
  */
-export const readPersistedTranscript = async (
-  context: ConversationContext,
-): Promise<ConversationMessagePage | undefined> => {
-  const { persistKey, scope, storage, storageKey } = conversationMessagesResource;
-  if (!storage || !persistKey(conversationMessagesKey(context))) return undefined;
-  const row = await storage.get({ queryKey: storageKey(context), scope: scope.get() });
-  return row?.data;
+export interface ToolResultPayloadRead {
+  value?: ToolResultPayload;
+}
+
+export type ToolResultPayload = Awaited<ReturnType<MessageService['getToolResultPayload']>>;
+
+/**
+ * Rows larger than this stay in memory only: a single tool result can be
+ * megabytes (a page scrape, a long log), and a reload refetching that one is
+ * cheaper than keeping it on disk.
+ */
+export const TOOL_RESULT_PAYLOAD_MAX_PERSISTED_CHARS = 128 * 1024;
+
+/** Recently opened payloads that survive a reload; older rows are evicted LRU. */
+export const TOOL_RESULT_PAYLOAD_MAX_PERSISTED_ENTRIES = 200;
+
+const TOOL_RESULT_PAYLOAD_NAME = 'toolResultPayload';
+const TOOL_RESULT_PAYLOAD_VERSION = 1;
+
+const serializedLength = (value: unknown) => {
+  try {
+    return JSON.stringify(value)?.length ?? 0;
+  } catch {
+    return Infinity;
+  }
 };
 
-// Terminal host updates also arrive for conversations whose component has unmounted.
-const settledTranscriptWrites = new ReplicaWriteQueue(conversationMessagesResource.storage!);
+/**
+ * IndexedDB storage that refuses oversized payload rows: the write becomes a
+ * delete, so neither the large body nor an older copy of it hydrates later.
+ * The engine's own index row passes through untouched.
+ */
+export class SizeCappedPayloadStorage implements ReplicaStorage<ToolResultPayloadRead> {
+  readonly #inner: ReplicaStorage<ToolResultPayloadRead>;
+  readonly #maxChars: number;
 
-export const persistSettledTranscript = (
-  context: ConversationContext,
-  messages: UIChatMessage[],
-) => {
-  const resource = conversationMessagesResource;
-  const scope = resource.scope.get();
-  if (!resource.scope.canPersist() || !resource.persistKey(resource.key(context))) return;
-  const cursor = getMessageListWindowOlderCursor(context);
-  settledTranscriptWrites.update({ queryKey: resource.storageKey(context), scope }, (current) => {
-    const previous = current?.data;
-    const cursorBoundary = cursor ? messages.findIndex((message) => message.id === cursor.id) : -1;
-    // Threads have no round cursor. The persisted projection still identifies
-    // their head window, including synthetic nodes sorted before its first row.
-    const previousIds = new Set(
-      previous?.items.filter((item) => !isSyntheticGroupNode(item)).map((item) => item.id),
-    );
-    const boundary =
-      cursorBoundary >= 0 ? cursorBoundary : messages.findIndex((item) => previousIds.has(item.id));
-    const syntheticIds = new Set(
-      previous?.items.filter(isSyntheticGroupNode).map((item) => item.id),
-    );
-    const head =
-      cursor === null
-        ? messages
-        : boundary >= 0
-          ? messages.filter((item, index) => index >= boundary || syntheticIds.has(item.id))
-          : previous
-            ? messages.slice(-previous.items.length)
-            : messages;
-    const data = transcriptOf(head);
-    if (cursor === null || cursorBoundary >= 0) {
-      data.nextCursor = cursor;
-      data.hasMore = cursor !== null;
-    } else if (boundary >= 0 && previous?.items[0]?.id === messages[boundary]?.id) {
-      data.nextCursor = previous.nextCursor;
-      data.hasMore = previous.hasMore;
-    }
-    return { data: toPersistedTranscript(data), updatedAt: Date.now() };
-  });
-};
+  constructor(inner: ReplicaStorage<ToolResultPayloadRead>, maxChars: number) {
+    this.#inner = inner;
+    this.#maxChars = maxChars;
+  }
+
+  get = (key: ReplicaRowKey) => this.#inner.get(key);
+
+  getStrict = (key: ReplicaRowKey) =>
+    this.#inner.getStrict ? this.#inner.getStrict(key) : this.#inner.get(key);
+
+  remove = (key: ReplicaRowKey) => this.#inner.remove(key);
+
+  set = (key: ReplicaRowKey, row: ReplicaRow<ToolResultPayloadRead>) => {
+    if (key.queryKey !== REPLICA_INDEX_KEY && serializedLength(row.data) > this.#maxChars)
+      return this.#inner.remove(key);
+    return this.#inner.set(key, row);
+  };
+}
+
+/**
+ * Projected tool payloads by message id. Immutable per message, so after a
+ * reload the card paints the persisted copy and the read only confirms it.
+ * Partitioned by the cache scope (user + workspace), bounded by count and by
+ * row size.
+ */
+export const toolResultPayloadResource = defineReplica<string, ToolResultPayloadRead>({
+  key: (messageId) => messageId,
+  name: TOOL_RESULT_PAYLOAD_NAME,
+  persist: { maxEntries: TOOL_RESULT_PAYLOAD_MAX_PERSISTED_ENTRIES },
+  storage: new SizeCappedPayloadStorage(
+    new IndexedDBQueryProjectionStorage<ToolResultPayloadRead>({
+      namespace: `replica:${TOOL_RESULT_PAYLOAD_NAME}:v${TOOL_RESULT_PAYLOAD_VERSION}`,
+    }),
+    TOOL_RESULT_PAYLOAD_MAX_PERSISTED_CHARS,
+  ),
+  version: TOOL_RESULT_PAYLOAD_VERSION,
+});

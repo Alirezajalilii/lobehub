@@ -39,7 +39,7 @@ const mockUpdateToolMessage = vi.fn();
 const mockGetMessages = vi.fn();
 
 const mockToastInfo = vi.fn();
-vi.mock('@lobehub/ui/base-ui', async (importOriginal) => ({
+vi.mock('@lobehub/ui', async (importOriginal) => ({
   ...(await importOriginal<object>()),
   toast: { info: (...args: unknown[]) => mockToastInfo(...args) },
 }));
@@ -2217,6 +2217,24 @@ describe('heterogeneousAgentExecutor DB persistence', () => {
 
       expect(mockSendPrompt.mock.calls[0][0].replayTranscript).toBeUndefined();
       expect(outcome).toBeUndefined();
+    });
+
+    // regression: non-image attachments were dropped on the way to the CLI.
+    it('should append non-image attachments to the prompt as download links', async () => {
+      const store = createMockStore();
+      const get = vi.fn(() => store);
+      setupIpcCapture();
+
+      await executeHeterogeneousAgent(get, {
+        ...defaultParams,
+        attachedFiles: [
+          { fileType: 'text/markdown', name: 'svg.md', size: 2048, url: 'https://signed/svg.md' },
+        ],
+      });
+
+      const { prompt } = mockSendPrompt.mock.calls[0][0];
+      expect(prompt).toMatch(/^test prompt\n\n<attached_files>/);
+      expect(prompt).toContain('- svg.md (text/markdown, 2.0 KB): https://signed/svg.md');
     });
 
     it('should forward imageList to heterogeneousAgentService.sendPrompt for Codex runs', async () => {

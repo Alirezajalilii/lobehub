@@ -24,6 +24,7 @@ import { messageMapKey } from '@/store/chat/utils/messageMapKey';
 import { topicMapKey } from '@/store/chat/utils/topicMapKey';
 import { useDeviceStore } from '@/store/device';
 import { fileChatSelectors, useFileStore } from '@/store/file';
+import { type ProjectDirectory, useProjectDirectoryStore } from '@/store/projectWorkingDirectory';
 import { getSessionStoreState } from '@/store/session';
 import * as toolStoreModule from '@/store/tool';
 import { pageAgentRuntime } from '@/store/tool/slices/builtin/executors/pageAgentRuntime';
@@ -109,7 +110,7 @@ afterEach(() => {
   // Zustand state and the window-backed agent context survive `restoreAllMocks`,
   // so a cwd test that seeds a device (or a desktop path) would otherwise leak
   // a working directory into every later send in this file.
-  useDeviceStore.setState({ devices: [] });
+  useDeviceStore.setState({ deviceListMap: {} });
   delete window.__LOBE_GLOBAL_AGENT_CONTEXT__;
   vi.restoreAllMocks();
 });
@@ -480,6 +481,104 @@ describe('ConversationLifecycle actions', () => {
         expect(executeGatewayAgentSpy).toHaveBeenCalledWith(
           expect.objectContaining({ projectWorkingDirectoryId: 'dir-85' }),
         );
+      });
+
+      // Regression: every project send awaited `projectWorkingDirectory.resolve`
+      // before the optimistic pair was dispatched, so the message only appeared
+      // after a network round trip. The directory replica already holds the row.
+      describe('project directory read from the local replica', () => {
+        const directoryRow = {
+          deviceId: 'device-85',
+          environmentId: 'env-85',
+          id: 'dir-85',
+          instanceId: 'inst-85',
+          projectId: 'prj-1',
+        } as ProjectDirectory;
+
+        afterEach(() => {
+          useProjectDirectoryStore.setState({ directoriesMap: {} });
+        });
+
+        const sendWithPendingGateway = async (context: ReturnType<typeof createTestContext>) => {
+          const { projectWorkingDirectoryService } =
+            await import('@/services/projectWorkingDirectory');
+          const resolveSpy = vi.spyOn(projectWorkingDirectoryService, 'resolve');
+          let releaseGateway!: () => void;
+          const executeGatewayAgentSpy = vi.fn(
+            () =>
+              new Promise((resolve) => {
+                releaseGateway = () => resolve({ topicId: 'tpc_new' });
+              }),
+          );
+          useProjectDirectoryStore.setState({ directoriesMap: { all: [directoryRow] } });
+          act(() => {
+            useChatStore.setState({
+              executeGatewayAgent: executeGatewayAgentSpy as any,
+              isGatewayModeEnabled: () => true,
+            });
+          });
+
+          const { result } = renderHook(() => useChatStore());
+          let sendPromise!: Promise<unknown>;
+          await act(async () => {
+            sendPromise = result.current.sendMessage({ context, message: 'Project send' });
+          });
+          await waitFor(() => expect(executeGatewayAgentSpy).toHaveBeenCalled());
+
+          const optimisticUser = Object.values(useChatStore.getState().dbMessagesMap)
+            .flat()
+            .find((message) => message.role === 'user' && message.content === 'Project send');
+
+          await act(async () => {
+            releaseGateway();
+            await sendPromise;
+          });
+
+          return { executeGatewayAgentSpy, optimisticUser, resolveSpy };
+        };
+
+        it('dispatches a staged-directory send without awaiting resolve', async () => {
+          act(() => {
+            useChatStore.setState({
+              pendingNewTopicDirectory: {
+                agentId: TEST_IDS.SESSION_ID,
+                projectWorkingDirectoryId: 'dir-85',
+              },
+            });
+          });
+
+          const { executeGatewayAgentSpy, optimisticUser, resolveSpy } =
+            await sendWithPendingGateway(createTestContext());
+
+          expect(resolveSpy).not.toHaveBeenCalled();
+          expect(optimisticUser).toBeDefined();
+          expect(executeGatewayAgentSpy).toHaveBeenCalledWith(
+            expect.objectContaining({ projectWorkingDirectoryId: 'dir-85' }),
+          );
+        });
+
+        it('dispatches a send in a directory-bound topic without awaiting resolve', async () => {
+          act(() => {
+            useChatStore.setState({
+              topicDetailMap: {
+                tpc_bound: {
+                  createdAt: Date.now(),
+                  id: 'tpc_bound',
+                  projectWorkingDirectoryId: 'dir-85',
+                  title: 'Bound',
+                  updatedAt: Date.now(),
+                } as any,
+              },
+            });
+          });
+
+          const { executeGatewayAgentSpy, optimisticUser, resolveSpy } =
+            await sendWithPendingGateway({ ...createTestContext(), topicId: 'tpc_bound' });
+
+          expect(resolveSpy).not.toHaveBeenCalled();
+          expect(optimisticUser).toBeDefined();
+          expect(executeGatewayAgentSpy).toHaveBeenCalled();
+        });
       });
 
       it('should restore the pre-send editor snapshot when a gateway send fails', async () => {
@@ -2428,7 +2527,7 @@ describe('ConversationLifecycle actions', () => {
         });
         act(() => {
           useDeviceStore.setState({
-            devices: [{ defaultCwd: '/repo/default', deviceId, name: 'Mac' }] as any,
+            deviceListMap: { all: [{ defaultCwd: '/repo/default', deviceId, name: 'Mac' }] as any },
           });
         });
 
@@ -2672,13 +2771,19 @@ describe('ConversationLifecycle actions', () => {
           window.__LOBE_GLOBAL_AGENT_CONTEXT__ = { desktopPath: DESKTOP_PATH };
         });
 
-        it('snapshots the heterogeneous effort into the first-send topic', async () => {
+        it('snapshots the heterogeneous effort and speed into the first-send topic', async () => {
           const sendSpy = setupHeteroRun({
-            heterogeneousProvider: { command: 'codex', effort: 'high', type: 'codex' },
+            heterogeneousProvider: {
+              args: ['-c', 'service_tier="fast"'],
+              command: 'codex',
+              effort: 'high',
+              type: 'codex',
+            },
           });
           await sendHeteroMessage();
           expect(sendSpy.mock.calls[0][0].newTopic?.metadata).toMatchObject({
             heteroEffort: 'high',
+            heteroSpeed: 'fast',
           });
         });
 
@@ -2686,9 +2791,11 @@ describe('ConversationLifecycle actions', () => {
           const sendMessageInServerSpy = setupHeteroRun();
           act(() => {
             useDeviceStore.setState({
-              devices: [
-                { defaultCwd: '/repo/device-default', deviceId: HETERO_DEVICE_ID, name: 'Mac' },
-              ] as any,
+              deviceListMap: {
+                all: [
+                  { defaultCwd: '/repo/device-default', deviceId: HETERO_DEVICE_ID, name: 'Mac' },
+                ] as any,
+              },
             });
           });
 
@@ -2778,9 +2885,11 @@ describe('ConversationLifecycle actions', () => {
           });
           act(() => {
             useDeviceStore.setState({
-              devices: [
-                { defaultCwd: '/repo/device-default', deviceId: HETERO_DEVICE_ID, name: 'Mac' },
-              ] as any,
+              deviceListMap: {
+                all: [
+                  { defaultCwd: '/repo/device-default', deviceId: HETERO_DEVICE_ID, name: 'Mac' },
+                ] as any,
+              },
             });
           });
 

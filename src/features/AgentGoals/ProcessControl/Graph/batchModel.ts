@@ -1,5 +1,6 @@
 import {
   GOAL_BATCH_ASSAY_TITLE,
+  GOAL_BATCH_RELEASE_TITLE,
   GOAL_BATCH_TEMPLATE_TITLE,
   ROLLOUT_WAVE_SIZE_DEFAULT,
 } from '@lobechat/const/goal';
@@ -7,7 +8,9 @@ import type {
   GoalRolloutGateCheck,
   GoalRolloutGateCheckKey,
   GoalRolloutGateEvaluation,
+  GoalRolloutLearning,
   GoalRolloutPhase,
+  GoalRolloutPlanSkill,
 } from '@lobechat/types';
 import { experimentMembers } from '@lobechat/utils/goalGraph';
 
@@ -80,7 +83,11 @@ export interface BatchRound {
     | { kind: 'round'; revision: number }
     /** `wave`: the 0-based roster wave the re-opened units ran in. */
     | { kind: 'waves'; wave: number };
+  /** The plan skill version this round runs on; a rewritten plan moves it past `revision`. */
+  planVersion: number;
   probes: BatchProbe[];
+  /** The release this round's passed gate is holding for a person, while it waits. */
+  releaseId?: string;
   /** 1-based recipe revision. */
   revision: number;
   templateId?: string;
@@ -101,7 +108,11 @@ export interface BatchModel {
   decisionIds: string[];
   /** What the gate checks, for a round no verdict has reached yet. */
   gateChecks: BatchGateCheck[];
+  /** What the batch's breaks taught it, oldest first. */
+  learnings: GoalRolloutLearning[];
   phase?: GoalRolloutPhase;
+  /** The execution plan as a skill in the user's library; round N is its version N. */
+  planSkill?: GoalRolloutPlanSkill;
   rounds: BatchRound[];
   /**
    * The round (1-based revision) each wave belongs to. A released wave belongs
@@ -174,6 +185,23 @@ export const buildBatchModel = (graph: GoalGraphView, batchId: string): BatchMod
       .filter((edge) => edge.kind === 'depends_on' && edge.sourceNodeId === assayId)
       .map((edge) => edge.targetNodeId)
       .filter((id) => memberIds.has(id));
+  // Each held release is a decision node of its own; only an open one belongs
+  // on the gate, the answered ones are its history.
+  const releaseReviews = members.filter(
+    (view) => view.node.kind === 'decision' && view.node.title === GOAL_BATCH_RELEASE_TITLE,
+  );
+  const openRelease = releaseReviews.find((view) => view.node.status === 'waiting');
+  // A round whose held release the owner sent back ended rejected, though its
+  // Assay itself was never answered: the decision lives on the release node,
+  // opened between this round's Assay and the next one.
+  const sentBack = (assay?: GoalNodeView, nextAssay?: GoalNodeView) =>
+    !!assay &&
+    releaseReviews.some(
+      (view) =>
+        byCreatedAt(view, assay) >= 0 &&
+        (!nextAssay || byCreatedAt(view, nextAssay) < 0) &&
+        view.humanTouches.some((touch) => touch.resolvedOptionId === 'revise'),
+    );
   const roundCount = Math.max(templates.length, assays.length, 1);
   const probeIdsByRound = Array.from({ length: roundCount }, (_, r) => {
     const assay = assays[r];
@@ -309,15 +337,22 @@ export const buildBatchModel = (graph: GoalGraphView, batchId: string): BatchMod
       assayId: assay?.node.id,
       evaluations: verdicts.filter((entry) => entry.revision === r + 1),
       forked,
-      gate: gateState(assay, r === roundCount - 1, state?.phase, probes),
+      gate:
+        r === roundCount - 1 && openRelease
+          ? 'human'
+          : r < roundCount - 1 && sentBack(assay, assays[r + 1])
+            ? 'rejected'
+            : gateState(assay, r === roundCount - 1, state?.phase, probes),
       origin: r > 0 ? roundOrigin(probes, r) : undefined,
+      planVersion: state?.planVersions?.[String(r + 1)] ?? r + 1,
       probes,
+      releaseId: r === roundCount - 1 ? openRelease?.node.id : undefined,
       revision: r + 1,
       templateId: template?.node.id,
     };
   });
 
-  const assayIds = new Set(assays.map((view) => view.node.id));
+  const assayIds = new Set([...assays, ...releaseReviews].map((view) => view.node.id));
   const decisionIds = members
     .filter((view) => view.node.kind === 'decision' && !assayIds.has(view.node.id))
     .map((view) => view.node.id);
@@ -335,7 +370,9 @@ export const buildBatchModel = (graph: GoalGraphView, batchId: string): BatchMod
     batchId,
     decisionIds,
     gateChecks,
+    learnings: state?.learnings ?? [],
     phase: state?.phase,
+    planSkill: state?.planSkill,
     rounds,
     waveRounds,
     waves,
@@ -352,7 +389,7 @@ const gateState = (
   if (assay && (assay.decision || assay.node.status === 'waiting')) return 'human';
   if (!current) return assay?.humanTouches.length ? 'rejected' : 'passed';
   if (phase === 'mass' || phase === 'done') return 'passed';
-  if (phase === 'pattern_break') return 'human';
+  if (phase === 'pattern_break' || phase === 'release_review') return 'human';
   const settled = probes.length > 0 && probes.every((probe) => probe.state === 'done');
   return settled ? 'checking' : 'locked';
 };
@@ -445,6 +482,16 @@ export const reopenedRows = (
  * The batch and round a plan version belongs to, when `nodeId` is one — so the
  * panel that opens on it can show every version and what changed between them.
  */
+/** How a round's plan is named: a skill when the batch keeps its plan as one. */
+export const batchPlanTitleKey = (model: Pick<BatchModel, 'planSkill'>, round: BatchRound) =>
+  model.planSkill
+    ? round.forked
+      ? ('goalBatch.skill.forked' as const)
+      : ('goalBatch.skill.title' as const)
+    : round.forked
+      ? ('goalBatch.template.forked' as const)
+      : ('goalBatch.template.title' as const);
+
 export const findBatchPlan = (
   graph: GoalGraphView,
   nodeId: string,

@@ -1,9 +1,7 @@
 'use client';
 
-import { Flexbox } from '@lobehub/ui';
-import { ActionIcon, Button, Input, Spin, Text } from '@lobehub/ui/base-ui';
-import { cssVar } from 'antd-style';
-import { ArrowUpIcon, FolderPlusIcon, HouseIcon } from 'lucide-react';
+import { ActionIcon, Button, cssVar, Flexbox, Input, Spin, Text } from '@lobehub/ui';
+import { ArrowUpIcon, FolderPlusIcon, HouseIcon, RefreshCwIcon } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import NavItem from '@/features/NavPanel/components/NavItem';
@@ -43,8 +41,18 @@ export const RemoteDirectoryBrowser = ({
     navigate: setDirectoryPath,
     setCreatingFolder,
   } = useDirectoryBrowserState(defaultPath);
-  const { directory, entries, error, hasMore, isLoading, isLoadingMore, loadMore, retry } =
-    useFetchDeviceDirectory(deviceId, path);
+  const {
+    directory,
+    entries,
+    error,
+    hasMore,
+    isLoading,
+    isLoadingMore,
+    isRefreshing,
+    loadMore,
+    refresh,
+    retry,
+  } = useFetchDeviceDirectory(deviceId, path);
   const canUseDirectory = !isLoading && isPathConfirmed(directory?.path);
   const displayedPath = draft ?? directory?.path ?? path ?? '';
 
@@ -78,6 +86,14 @@ export const RemoteDirectoryBrowser = ({
             icon={FolderPlusIcon}
             title={t('workingDirectory.newFolder')}
             onClick={() => setCreatingFolder(true)}
+          />
+          <ActionIcon
+            aria-label={t('workingDirectory.refreshFolders')}
+            disabled={loading || !directory}
+            icon={RefreshCwIcon}
+            loading={isRefreshing}
+            title={t('workingDirectory.refreshFolders')}
+            onClick={() => void refresh()}
           />
         </Flexbox>
         <Input

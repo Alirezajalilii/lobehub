@@ -43,8 +43,10 @@ import type {
 } from '@/database/schemas/verify';
 import type { LobeChatDatabase } from '@/database/type';
 import { notTrashed } from '@/database/utils/softDelete';
+import { notifyAcceptance } from '@/server/services/acceptanceReview/events';
 import { ExpertiseRejectionWorkflow } from '@/server/workflows/expertiseRejection';
 
+import { requireDecidableAcceptance } from './acceptanceDecision';
 import {
   type AcceptanceMergeSummary,
   findUnresolvedSupersedes,
@@ -577,6 +579,10 @@ export class AcceptanceService {
         );
         return doc ? { title: doc.title ?? null } : null;
       }
+      case 'goal_gate': {
+        const goal = await this.goalOfGate(subjectId);
+        return goal ? { title: goal.title } : null;
+      }
       case 'standalone': {
         return null;
       }
@@ -636,6 +642,10 @@ export class AcceptanceService {
     return task.id;
   };
 
+  /** The Goal a release-gate subject (its review node) belongs to. */
+  private goalOfGate = (nodeId: string) =>
+    new GoalModel(this.db, this.userId, this.workspaceId).findByNode(nodeId);
+
   private resolveSubjectProjectId = async (
     subjectType: AcceptanceSubjectType,
     subjectId: string,
@@ -646,6 +656,7 @@ export class AcceptanceService {
           ?.projectId ?? null
       );
     }
+    if (subjectType === 'goal_gate') return (await this.goalOfGate(subjectId))?.projectId ?? null;
     if (subjectType === 'topic') {
       const taskTopic = await new TaskTopicModel(
         this.db,
@@ -826,6 +837,7 @@ export class AcceptanceService {
     // Rounds inherit the aggregate's visibility so a private acceptance's new
     // round never leaks through its own report URL.
     const run = await this.runModel.attachToAcceptance(runId, acceptanceId, acceptance.visibility);
+    notifyAcceptance(acceptanceId, 'session');
     await this.recomputeStatus(acceptanceId);
     log('run %s attached to acceptance %s as round %d', runId, acceptanceId, run.roundIndex);
 
@@ -938,6 +950,7 @@ export class AcceptanceService {
     const status = statusFromRound(current, Boolean(report));
     if (status !== acceptance.status) {
       await this.acceptanceModel.updatePolicyStatus(acceptanceId, status);
+      notifyAcceptance(acceptanceId, 'session');
       log('acceptance %s → %s (from round %d)', acceptanceId, status, current.roundIndex);
     }
 
@@ -1024,10 +1037,11 @@ export class AcceptanceService {
    * completes a task subject that verification alone didn't settle.
    */
   accept = async (acceptanceId: string, comment?: string): Promise<AcceptanceItem> => {
-    const acceptance = await this.requireDecidableAcceptance(acceptanceId);
+    const acceptance = await requireDecidableAcceptance(this.acceptanceModel, acceptanceId);
 
     const settled = await this.stampDecision(acceptanceId, 'accept', comment);
     await this.acceptanceModel.updateStatus(acceptanceId, 'accepted');
+    notifyAcceptance(acceptanceId, 'session', this.actorUserId);
 
     // A terminal decision settles the current round as surely as a new round landing does — and it
     // is the ONLY thing that settles the last one, which no later round will ever follow. Without
@@ -1073,6 +1087,7 @@ export class AcceptanceService {
     }
 
     await this.acceptanceModel.updateStatus(acceptanceId, 'accepted');
+    notifyAcceptance(acceptanceId, 'session', this.actorUserId);
     if (current) this.distilSettledRound(acceptanceId, current.id);
     if (acceptance.subjectType === 'task') await this.completeTaskSubject(acceptance.subjectId);
 
@@ -1098,10 +1113,11 @@ export class AcceptanceService {
    * decision detail through the prompt builder.
    */
   reject = async (acceptanceId: string, comment?: string): Promise<AcceptanceItem> => {
-    const acceptance = await this.requireDecidableAcceptance(acceptanceId);
+    const acceptance = await requireDecidableAcceptance(this.acceptanceModel, acceptanceId);
 
     const settled = await this.stampDecision(acceptanceId, 'reject', comment);
     await this.acceptanceModel.updateStatus(acceptanceId, 'rejected');
+    notifyAcceptance(acceptanceId, 'session', this.actorUserId);
 
     this.distilSettledRound(acceptanceId, settled);
 
@@ -1234,34 +1250,6 @@ export class AcceptanceService {
 
     log('acceptance %s: %d check result(s) marked %s', acceptanceId, targets.size, decision);
     return { resultIds: [...targets.keys()] };
-  };
-
-  /**
-   * A user decision needs a SETTLED round to judge (`delivered`, or `errored`
-   * — the verifier could not run, the user may still take or refuse the
-   * delivery). Deciding mid-flight would stamp a terminal state (and possibly
-   * complete a task) before any report/verdict exists, and `recomputeStatus`
-   * treats `accepted` as sticky, so a premature accept could never be
-   * corrected by the pipeline.
-   */
-  private requireDecidableAcceptance = async (acceptanceId: string): Promise<AcceptanceItem> => {
-    const acceptance = await this.acceptanceModel.findById(acceptanceId);
-    if (!acceptance) throw new Error(`Acceptance "${acceptanceId}" not found`);
-    if (acceptance.status === 'accepted') {
-      throw new Error('This delivery has already been accepted');
-    }
-    if (acceptance.status === 'closed') {
-      throw new Error('This acceptance is closed — reopen it before making a decision');
-    }
-    if (acceptance.status === 'rejected') {
-      throw new Error('This delivery was rejected — the next verification round re-opens it');
-    }
-    if (acceptance.status !== 'delivered' && acceptance.status !== 'errored') {
-      throw new Error(
-        `Verification is still in progress (${acceptance.status}) — the decision comes once the round settles`,
-      );
-    }
-    return acceptance;
   };
 
   /** Stamps the decision on the current round and returns it — the round that decision settles. */

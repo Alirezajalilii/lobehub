@@ -3,6 +3,7 @@ import { BUILTIN_AGENT_SLUGS } from '@lobechat/builtin-agents';
 import type { SandboxStorageClaim } from '@lobechat/builtin-tool-cloud-sandbox';
 import type { LobeChatDatabase } from '@lobechat/database';
 import type {
+  AgentSenderMetadata,
   ExecAgentResult,
   ExecGroupAgentParams,
   ExecGroupAgentResult,
@@ -25,6 +26,7 @@ import {
 import { AgentModel } from '@/database/models/agent';
 import { AgentOperationModel } from '@/database/models/agentOperation';
 import { AgentShareModel } from '@/database/models/agentShare';
+import { ChatGroupModel } from '@/database/models/chatGroup';
 import { ConnectorModel } from '@/database/models/connector';
 import { ConnectorToolModel } from '@/database/models/connectorTool';
 import { DeviceModel } from '@/database/models/device';
@@ -34,6 +36,7 @@ import { TaskModel } from '@/database/models/task';
 import { ThreadModel } from '@/database/models/thread';
 import { TopicModel } from '@/database/models/topic';
 import { UserModel } from '@/database/models/user';
+import { createStreamEventManager } from '@/server/modules/AgentRuntime/factory';
 import { AgentService } from '@/server/services/agent';
 import { AgentDocumentsService } from '@/server/services/agentDocuments';
 import type {
@@ -83,6 +86,9 @@ import { startOperation } from './pipeline/startOperation';
 import { resolveNewTopicSnapshot, setupTurn } from './pipeline/turnSetup';
 import { createRunFacts, type RunFacts } from './runFacts';
 import { applyShareGateToAgentConfig } from './shareGate';
+import { resolveAgentSenderFromOperation } from './sourceAttribution';
+import type { SubAgentLlmRelayRequest } from './subAgentLlmRelay';
+import { closeSubAgentLlmRelay, openSubAgentLlmRelay } from './subAgentLlmRelay';
 import type { SubAgentRunDeps } from './subAgentRuns';
 import { execAgentMember, execAgentThreadRun } from './subAgentRuns';
 import { acquireTopicStartReservation, TopicStartReservationError } from './topicStartReservation';
@@ -955,6 +961,7 @@ export class AiAgentService {
       resumeToolResult,
       approvalResolutionRequestId: providedApprovalResolutionRequestId,
       approvalSourceOperationId: providedApprovalSourceOperationId,
+      selectedSkillIds,
       selectedToolIds,
       shareGate,
       mentionedAgents,
@@ -1211,6 +1218,14 @@ export class AiAgentService {
     );
     if (reusedContinuation) return reusedContinuation;
 
+    // Agent → agent attribution: resolve the launching run's agent into a
+    // display snapshot once, before the turn rows exist, so the persisted user
+    // message carries a self-contained sender block.
+    const agentSender = await this.resolveSourceAgentSnapshot(
+      resolvedAgentId,
+      params.sourceOperationId,
+    );
+
     // Stage 3 + shared turn setup — topic creation/reuse (with the pinned
     // model), device-access policy, hetero detection, attachment ingestion, and
     // the persisted user/assistant rows (see `pipeline/turnSetup`).
@@ -1225,6 +1240,7 @@ export class AiAgentService {
         },
         {
           agentConfig,
+          agentSender,
           agentSlug,
           appContext,
           assistantAgentId,
@@ -1248,6 +1264,7 @@ export class AiAgentService {
           resolvedAgentId,
           resume,
           runFromHistory,
+          selectedSkillIds,
           shareGate,
           steer,
           throwIfExecutionAborted,
@@ -1332,6 +1349,7 @@ export class AiAgentService {
           onOperationCreated: params.onOperationCreated,
           parentOperationId,
           pinnedHeterogeneousTopicModel: turn.pinnedHeterogeneousTopicModel,
+          pinnedHeterogeneousTopicSources: turn.pinnedHeterogeneousTopicSources,
           requestTrigger: requestTriggerMetadata.trigger,
           requestedDeviceId: turn.requestedDeviceId,
           runAttachments,
@@ -1430,6 +1448,7 @@ export class AiAgentService {
     // instead of on the send path.
     const initRequest = buildOperationInitRequest({
       additionalPluginIds,
+      taskId: operationTaskId,
       agentSlug,
       approvalOwnerAssistantId,
       approvedToolEntries,
@@ -1460,6 +1479,7 @@ export class AiAgentService {
       resumeFromHistory: runFromHistory,
       resumeToolResult: resolvedToolResult,
       runAttachments,
+      selectedSkillIds,
       selectedToolIds,
       topicBoundDeviceId: turn.topicBoundDeviceId,
     });
@@ -1675,6 +1695,28 @@ export class AiAgentService {
   }
 
   /**
+   * Snapshot the agent that launched an agent → agent run (`metadata.agentSender`)
+   * from the caller's own operation row; `resolveAgentSenderFromOperation` owns the
+   * trust and shareability rules.
+   */
+  private resolveSourceAgentSnapshot = (
+    destinationAgentId: string,
+    sourceOperationId?: string,
+  ): Promise<AgentSenderMetadata | undefined> =>
+    resolveAgentSenderFromOperation(sourceOperationId, {
+      destinationAgentId,
+      findAgentDisplayFields: (agentId) => this.agentModel.getAgentDisplayFields(agentId),
+      findAgentVisibility: (agentId) => this.agentModel.getAgentVisibility(agentId),
+      findChatGroupVisibility: async (chatGroupId) =>
+        (await new ChatGroupModel(this.db, this.userId, this.workspaceId).findById(chatGroupId))
+          ?.visibility ?? null,
+      findOperation: (operationId) => this.agentOperationModel.findById(operationId),
+      findTopic: (topicId) => this.topicModel.findById(topicId),
+      userId: this.userId,
+      workspaceId: this.workspaceId,
+    });
+
+  /**
    * `AgentRuntimeDelegate.verifyShareRunStillAuthorized` implementation — see
    * `AgentShareModel.isRunStillAuthorized`'s JSDoc for what "authorized" means
    * and why a per-step recheck (not only at step 0) is what actually stops a
@@ -1702,11 +1744,30 @@ export class AiAgentService {
    * virtual sub-agent and it does not install the async completion bridge.
    */
   // Arrow field (not a method) so it stays bound when handed to AgentRuntimeService.
-  execSubAgent = async (params: ExecSubAgentParams): Promise<ExecSubAgentResult> =>
-    execAgentThreadRun(this.subAgentRunDeps, params, {
+  execSubAgent = async (
+    params: ExecSubAgentParams,
+    options: {
+      /** The dispatching tab stands by on this channel to run the child's device-only LLM calls. */
+      llmRelay?: SubAgentLlmRelayRequest;
+    } = {},
+  ): Promise<ExecSubAgentResult> => {
+    const llmExecutor = await openSubAgentLlmRelay(options.llmRelay, {
+      streamManager: createStreamEventManager(),
+      userId: this.userId,
+      workspaceId: this.workspaceId,
+    });
+
+    return execAgentThreadRun(this.subAgentRunDeps, params, {
       isSubAgent: false,
+      llmExecutor,
       logScope: 'execSubAgent',
     });
+  };
+
+  /** The tab stopped standing by on a sub-agent's relay channel: end it on the gateway. */
+  releaseSubAgentLlmRelay = async (channel: string): Promise<{ success: boolean }> => ({
+    success: await closeSubAgentLlmRelay(channel, this.userId, createStreamEventManager()),
+  });
 
   /**
    * Execute a virtual sub-agent created by `lobe-agent.callSubAgent`.
