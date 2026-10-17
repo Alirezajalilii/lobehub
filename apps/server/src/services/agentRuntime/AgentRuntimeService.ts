@@ -39,7 +39,6 @@ import {
 } from '@lobechat/observability-otel/modules/agent-runtime';
 import { ssrfSafeFetch } from '@lobechat/ssrf-safe-fetch';
 import {
-  type AgentRunInitRequest,
   type ChatToolPayload,
   type ClientLlmWaitItem,
   type EvalToolForwardingConfig,
@@ -115,6 +114,7 @@ import {
   normalizeCompletionMessages,
 } from './CompletionLifecycle';
 import { stepChangedCredentials } from './credentialFacts';
+import { type DeferredInitRunner, runPendingInit } from './deferredInit';
 import { logToolCallPc } from './formalObservation';
 import { type AgentHook, hookDispatcher, parseSerializedHooks } from './hooks';
 import {
@@ -125,8 +125,10 @@ import {
 import { HumanInterventionHandler } from './HumanInterventionHandler';
 import { buildProjectedMessagePatch } from './messagePatch';
 import { OperationTraceRecorder } from './OperationTraceRecorder';
+import { abortShareRun, isShareRunRevoked } from './shareRunGate';
 import { createDefaultSnapshotStore } from './snapshotStore';
 import { buildStepPresentation, formatTokenCount } from './stepPresentation';
+import { loadTerminalDurableStatus } from './terminalStatus';
 import {
   type AgentExecutionParams,
   type AgentExecutionResult,
@@ -156,9 +158,6 @@ const log = debug('lobe-server:agent-runtime-service');
 
 /** Tries for a client wait's notice or expiry error on the assistant row. */
 const CLIENT_WAIT_ROW_WRITE_ATTEMPTS = 3;
-
-const isTerminalAgentStatus = (status: AgentState['status'] | undefined) =>
-  status === 'done' || status === 'error' || status === 'interrupted';
 
 /**
  * Base delay before the first `verifyAsyncToolBarrier` re-check fires after a
@@ -471,27 +470,8 @@ export interface AgentRuntimeDelegate {
    * placeholder before resuming the parked parent operation.
    */
   execVirtualSubAgent?: (params: ExecVirtualSubAgentParams) => Promise<ExecSubAgentResult>;
-  /**
-   * Run the init an operation was created without: tool discovery and the
-   * message / context assembly for `state.request`. Returns the state slots they
-   * produce, which the step merges before executing.
-   *
-   * Implemented by AiAgentService (it owns the pipeline and the models it needs);
-   * the runtime only knows when to ask and what to do with the answer.
-   */
-  runDeferredInit?: (params: {
-    operationId: string;
-    request: AgentRunInitRequest;
-    state: AgentState;
-  }) => Promise<{
-    /**
-     * The context step 0 must run with. The step was queued before the init
-     * existed, so the context it carries is a placeholder — the assembled base
-     * context (and an approval resume's phase) only exists after init.
-     */
-    context: AgentRuntimeContext;
-    state: Partial<AgentState>;
-  }>;
+  /** Run the init an operation was created without (see `DeferredInitRunner`). */
+  runDeferredInit?: DeferredInitRunner;
   /**
    * Re-check that an Agent Share visitor run is STILL authorized to continue,
    * called on EVERY step. Without it, a revocation that lands mid-run (link →
@@ -1179,62 +1159,17 @@ export class AgentRuntimeService {
     }
   }
 
-  /**
-   * Terminate an Agent Share visitor run whose authorization was revoked
-   * mid-flight (see the per-step check in `executeStep`).
-   *
-   * Persists `interrupted` onto the already-loaded state — the same terminal
-   * status a visitor's own Stop produces — so the client's stream settles
-   * normally instead of hanging. Falls back to `interruptOperation` when no
-   * state was readable. A persistence failure is logged, never rethrown: the
-   * run must stop regardless of whether the terminal status could be written.
-   *
-   * The completion lifecycle (`emitSignalEvents` + `dispatchHooks`) must run
-   * here too: this abort short-circuits `executeStep` before `runtime.step()`,
-   * so no downstream path is left to persist the terminal status. Without it
-   * `saveAgentState` would only update the runtime-state cache and publish the
-   * terminal stream event, leaving `agent_operations` stuck on `running` —
-   * which `TopicModel.tryReserveTaskCallback` then reads as a live run and
-   * blocks the visitor's next send on that topic for the abandoned-run TTL.
-   */
-  private async buildShareAbortResult(
-    operationId: string,
-    state: AgentState | null | undefined,
-  ): Promise<AgentExecutionResult> {
-    log('[%s] Aborting share visitor run — the share is no longer authorized', operationId);
-
-    try {
-      if (state) {
-        const interruptedState: AgentState = {
-          ...state,
-          lastModified: new Date().toISOString(),
-          status: 'interrupted',
-        };
-        await this.coordinator.saveAgentState(operationId, interruptedState);
-
-        await this.completionLifecycle.emitSignalEvents(
-          operationId,
-          interruptedState,
-          'interrupted',
-        );
-        await this.completionLifecycle.dispatchHooks(operationId, interruptedState, 'interrupted');
-      } else {
-        await this.interruptOperation(operationId);
-      }
-    } catch (error) {
-      log(
-        '[%s] Failed to persist interrupted state for an aborted share run: %O',
-        operationId,
-        error,
-      );
-    }
-
-    return {
-      nextStepScheduled: false,
-      state: { status: 'interrupted' },
-      stepResult: null,
-      success: false,
-    };
+  /** Terminate a shared run whose authorization was revoked (see `abortShareRun`). */
+  private buildShareAbortResult(operationId: string, state: AgentState | null | undefined) {
+    return abortShareRun(
+      {
+        completionLifecycle: this.completionLifecycle,
+        coordinator: this.coordinator,
+        interruptOperation: (id) => this.interruptOperation(id),
+      },
+      operationId,
+      state,
+    );
   }
 
   // ==================== Operation Management ====================
@@ -1845,7 +1780,11 @@ export class AgentRuntimeService {
     // marked that operation interrupted. ACK it without touching the old
     // topic; otherwise the abandoned attempt can finish concurrently with its
     // replacement and submit a second Acceptance run.
-    const durableTerminalStatus = await this.loadTerminalDurableStatus(operationId, stepIndex);
+    const durableTerminalStatus = await loadTerminalDurableStatus(
+      this.agentOperationModel,
+      operationId,
+      stepIndex,
+    );
     if (durableTerminalStatus) {
       log(
         '[%s][%d] Skipping delivery for terminal durable operation (%s)',
@@ -2093,141 +2032,29 @@ export class AgentRuntimeService {
           throw new Error(`Agent state not found for operation ${operationId}`);
         }
 
-        // The run may have been created without its init — the send path
-        // returned as soon as the messages were durable and left discovery and
-        // the context assembly to this worker. The turn's request is still on the
-        // state, which is exactly what says the init has not run yet.
-        //
-        // It runs after the step claim, so two deliveries of step 0 cannot both
-        // pay for a discovery, and before anything is published, so the client
-        // sees one `step_start` for a fully initialized run. A failure here
-        // falls into the step error handler below: the operation ends with the
-        // error on its assistant message, which is the only honest outcome once
-        // the user has already been told the message was sent.
+        // A run created without its init still carries the turn's request: run
+        // that init here, after the step claim and before anything is published.
         let deferredInitContext: AgentRuntimeContext | undefined;
         if (agentState.request) {
-          if (isTerminalAgentStatus(agentState.status)) {
-            // The run ended before its init ran — typically a Stop whose writes
-            // all landed first. That save already published
-            // `agent_runtime_end`, so settle here, before `step_start`, and do
-            // not persist the terminal state a second time.
-            log(
-              '[%s][%d] Operation already %s before deferred init; skipping it',
-              operationId,
-              stepIndex,
-              agentState.status,
-            );
-            return this.settleSkippedStep(operationId, agentState);
-          } else if (await this.coordinator.isInterrupted(operationId)) {
-            // Stop pressed during the init window. Skip the discovery nobody is
-            // waiting for, but still settle the run: the state may read
-            // `running` if the interrupt landed only its sentinel before a
-            // crash. Return before `step_start` — persisting the stop publishes
-            // `agent_runtime_end`, and no step event may follow it.
-            log('[%s][%d] Interrupted before deferred init; skipping it', operationId, stepIndex);
-            await this.persistStopBeforeInit(operationId, agentState);
-            return this.settleSkippedStep(operationId, agentState);
-          } else {
-            // A shared-agent run revoked between enqueue and step 0 must not
-            // get creator-scoped discovery and history/persona assembly first:
-            // the per-step authorization re-check below comes too late for that.
-            if (await this.isShareRunRevoked(operationId, stepIndex, agentState)) {
-              return this.buildShareAbortResult(operationId, agentState);
-            }
-
-            if (!this.delegate?.runDeferredInit) {
-              throw new Error(
-                `Operation ${operationId} needs a deferred init but no runner is wired`,
-              );
-            }
-
-            const initStartedAt = Date.now();
-            const initialized = await this.delegate.runDeferredInit({
-              operationId,
-              request: agentState.request,
-              state: agentState,
-            });
-
-            // Stop can land while the init is awaited, and the abort poll is not
-            // armed yet. Saving this worker's pre-init `running` state now would
-            // overwrite the interrupted one and walk straight into LLM work, so
-            // re-read before writing anything.
-            const latest = await this.coordinator.loadAgentState(operationId);
-            if (
-              (await this.coordinator.isInterrupted(operationId)) ||
-              latest?.status === 'interrupted'
-            ) {
-              log(
-                '[%s][%d] Interrupted during deferred init; discarding its result',
-                operationId,
-                stepIndex,
-              );
-              await this.persistStopBeforeInit(operationId, latest ?? agentState);
-              Object.assign(agentState, latest ?? {}, { status: 'interrupted' });
-              return this.settleSkippedStep(operationId, agentState);
-            }
-
-            // The init can outlive the inactivity watchdog: abandonment (or a
-            // recovery that replaced this run) settles the operation, its
-            // lifecycle included, and may delete the runtime state while the
-            // init is awaited. A missing state, a terminal one, or a terminal
-            // durable row all mean the run is no longer this worker's — saving
-            // the stale `running` snapshot would resurrect it into LLM work.
-            const endedStatus = !latest
-              ? 'missing'
-              : isTerminalAgentStatus(latest.status)
-                ? latest.status
-                : await this.loadTerminalDurableStatus(operationId, stepIndex);
-            if (endedStatus) {
-              log(
-                '[%s][%d] Operation ended during deferred init (%s); discarding its result',
-                operationId,
-                stepIndex,
-                endedStatus,
-              );
-              return {
-                nextStepScheduled: false,
-                state: latest ?? {},
-                stepResult: null,
-                success: true,
-              };
-            } else {
-              // One write: the initialized slots, the assembled context (a
-              // redelivery after this save finds the request gone and must still
-              // start from it), and the cleared request (so that redelivery does
-              // not pay for discovery again).
-              Object.assign(agentState, initialized.state, {
-                initialContext: initialized.context,
-                request: undefined,
-              });
-              await this.coordinator.saveAgentState(operationId, agentState);
-
-              // The checks above and this save are not atomic: a Stop landing in
-              // between has already written its sentinel and interrupted state
-              // (publishing `agent_runtime_end`), which the save just overwrote
-              // with `running`. Re-check the sentinel once more and, if it is
-              // set, put the stop back and settle without a step event. A Stop
-              // after this point lands on the saved state and is handled like
-              // any Stop during a step.
-              if (await this.coordinator.isInterrupted(operationId)) {
-                log(
-                  '[%s][%d] Interrupted while the deferred init was saved; restoring the stop',
+          const init = await runPendingInit(
+            {
+              abortShareRun: (state) => this.buildShareAbortResult(operationId, state),
+              agentOperationModel: this.agentOperationModel,
+              coordinator: this.coordinator,
+              isShareRunRevoked: (state) =>
+                isShareRunRevoked(
+                  this.delegate.verifyShareRunStillAuthorized,
                   operationId,
                   stepIndex,
-                );
-                await this.persistStopBeforeInit(operationId, agentState);
-                return this.settleSkippedStep(operationId, agentState);
-              }
-
-              deferredInitContext = initialized.context;
-              log(
-                '[%s][%d] Deferred init finished in %dms',
-                operationId,
-                stepIndex,
-                Date.now() - initStartedAt,
-              );
-            }
-          }
+                  state,
+                ),
+              runDeferredInit: this.delegate?.runDeferredInit,
+              settleSkippedStep: (state) => this.settleSkippedStep(operationId, state),
+            },
+            { agentState, operationId, request: agentState.request, stepIndex },
+          );
+          if (init.result) return init.result;
+          deferredInitContext = init.context;
         }
 
         // A parked approval step is already durable before its generic Review
@@ -2360,7 +2187,14 @@ export class AgentRuntimeService {
         // step boundary. See `AgentShareModel.isRunStillAuthorized`'s JSDoc for
         // why one query covers every revocation path (visibility flip — which
         // is what turning sharing off does — share delete, agent delete).
-        if (await this.isShareRunRevoked(operationId, stepIndex, agentState)) {
+        if (
+          await isShareRunRevoked(
+            this.delegate.verifyShareRunStillAuthorized,
+            operationId,
+            stepIndex,
+            agentState,
+          )
+        ) {
           return this.buildShareAbortResult(operationId, agentState);
         }
 
@@ -5395,76 +5229,6 @@ export class AgentRuntimeService {
       stepResult: null,
       success: true,
     };
-  }
-
-  /**
-   * The durable operation row's status when it is terminal, else `undefined`.
-   * Redis keeps the resumable step state, but the row is the authority for
-   * cancellation, abandonment and recovery. A read failure preserves runtime
-   * availability: it reads as not terminal, and the step lock and the normal
-   * persistence path still apply.
-   */
-  private async loadTerminalDurableStatus(
-    operationId: string,
-    stepIndex: number,
-  ): Promise<'abandoned' | 'done' | 'error' | 'interrupted' | undefined> {
-    try {
-      const status = (await this.agentOperationModel.findById(operationId))?.status;
-      if (
-        status === 'done' ||
-        status === 'error' ||
-        status === 'interrupted' ||
-        status === 'abandoned'
-      ) {
-        return status;
-      }
-    } catch (error) {
-      log('[%s][%d] Durable operation status check failed: %O', operationId, stepIndex, error);
-    }
-    return undefined;
-  }
-
-  /**
-   * Make a stop that landed before (or during) a deferred init durable. The
-   * interrupt may have written only its sentinel before crashing, and the
-   * completion lifecycle does not own the runtime-state transition: the
-   * coordinator save does, and it is also what publishes `agent_runtime_end`
-   * exactly once. Idempotent for a state that is already interrupted.
-   */
-  private async persistStopBeforeInit(operationId: string, state: AgentState): Promise<void> {
-    const alreadyPersisted =
-      (await this.coordinator.loadAgentState(operationId))?.status === 'interrupted';
-    state.status = 'interrupted';
-    if (alreadyPersisted) return;
-    await this.coordinator.saveAgentState(operationId, {
-      ...state,
-      lastModified: new Date().toISOString(),
-      status: 'interrupted',
-    });
-  }
-
-  /**
-   * Whether an Agent Share visitor run has lost its authorization. Fails closed:
-   * a read failure is treated as revoked. Non-share runs are never revoked.
-   */
-  private async isShareRunRevoked(
-    operationId: string,
-    stepIndex: number,
-    agentState: AgentState,
-  ): Promise<boolean> {
-    if (!this.delegate.verifyShareRunStillAuthorized) return false;
-    const shareMarker = agentState.principal?.actor?.shareVisitor as
-      { agentId?: string; shareId?: string } | undefined;
-    if (!shareMarker?.agentId || !shareMarker.shareId) return false;
-    try {
-      return !(await this.delegate.verifyShareRunStillAuthorized({
-        agentId: shareMarker.agentId,
-        shareId: shareMarker.shareId,
-      }));
-    } catch (error) {
-      log('[%s][%d] Share run authorization re-check failed: %O', operationId, stepIndex, error);
-      return true;
-    }
   }
 
   /**
