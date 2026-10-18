@@ -152,7 +152,7 @@ export function registerMessageCommand(program: Command) {
       };
 
       const client = await getTrpcClient();
-      let result: { hasMore: boolean; items: any[] };
+      let result: { hasMore: boolean; items: any[]; truncated?: boolean };
       try {
         result = await client.message.searchByKeyword.query(input);
       } catch (error) {
@@ -201,6 +201,13 @@ export function registerMessageCommand(program: Command) {
 
       if (result.hasMore) {
         console.log(pc.dim(`\nMore results: add -P ${page + 1}`));
+      }
+      if (result.truncated) {
+        console.log(
+          pc.yellow(
+            'Only the most relevant matches were considered; narrow with --since/--until or --topic-id to see the rest.',
+          ),
+        );
       }
     });
 
