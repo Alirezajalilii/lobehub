@@ -141,7 +141,6 @@ describe('createGatewayEventHandler', () => {
       expect(store.internal_dispatchMessage).toHaveBeenCalledWith(
         expect.objectContaining({ id: 'msg-step2', type: 'createMessage' }),
         { operationId: 'op-1' },
-        { creationOrigin: 'server' },
       );
       expect(messageService.getMessages).not.toHaveBeenCalled();
       expect(store.replaceMessages).not.toHaveBeenCalled();
