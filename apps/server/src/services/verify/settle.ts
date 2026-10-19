@@ -4,6 +4,7 @@ import {
   VERIFICATION_FAILED_ERROR,
   VERIFICATION_UNJUDGEABLE_ERROR,
 } from '@lobechat/const/goal';
+import { isCheckWaivedByDispute } from '@lobechat/const/verify';
 import debug from 'debug';
 
 import { AgentOperationModel } from '@/database/models/agentOperation';
@@ -78,13 +79,14 @@ const MAX_REASON_CHARS = 300;
 export const describeVerifyFailure = (
   results: Pick<
     VerifyCheckResultItem,
-    'checkItemTitle' | 'required' | 'status' | 'suggestion' | 'toulmin' | 'verdict'
+    'checkItemTitle' | 'metadata' | 'required' | 'status' | 'suggestion' | 'toulmin' | 'verdict'
   >[],
   reviewFeedback?: string,
 ): string => {
   const failed = results.filter(
     (r) =>
       r.status !== 'errored' &&
+      !isCheckWaivedByDispute(r.metadata) &&
       (r.status === 'failed' || r.verdict === 'failed' || r.verdict === 'uncertain'),
   );
   // Only required checks gate the run. Optional failures stay out entirely —

@@ -539,6 +539,8 @@ export interface TaskRunPromptWorkspaceNode {
 export interface TaskRunPromptGoalLoop {
   /** Feedback from the automatic Acceptance review of the previous delivery. */
   automaticReviewFeedback?: string;
+  /** Criteria a panel already ruled on after the builder disputed them. */
+  disputeRulings?: Array<{ outcome: 'overruled' | 'upheld'; title: string }>;
   /** Checks that did not pass in the previous round, with the verifier's why/suggestion. */
   failedChecks?: Array<{ title: string; why?: string }>;
   /** Round budget. Null/undefined = uncapped. */
@@ -803,6 +805,9 @@ export const buildTaskRunPrompt = (input: TaskRunPromptInput, now?: Date): strin
     taskLines.push(
       '  Do not judge the Acceptance — submit evidence only; an independent verifier decides whether this Task is complete.',
     );
+    taskLines.push(
+      '  If a criterion is itself wrong — outside the requirement, contradicting it or another criterion, or impossible for any delivery — dispute it instead of bending the work to it: `disputeCriterion` with kind `invalid_criterion`, or `lh acceptance plan dispute "$LOBEHUB_OPERATION_ID" --item <checkItemId> --kind invalid_criterion --reason <why>` with a shell. Three review models rule on it at once and the majority decides; an upheld criterion is waived, an overruled one stands and cannot be disputed again. "Too hard" or "no time" is overruled.',
+    );
   }
 
   // Goal loop — context handed over from the previous round of the outer loop
@@ -828,11 +833,24 @@ export const buildTaskRunPrompt = (input: TaskRunPromptInput, now?: Date): strin
     if (reviewFeedback) {
       taskLines.push('  Review feedback on the last delivery (address this first):');
       taskLines.push(`    "${reviewFeedback}"`);
+      taskLines.push(
+        '  If a rejection is wrong because your evidence already proves the criterion, you may argue it instead of redoing the work: re-submit that evidence to this run, then dispute the criterion with kind `missed_evidence`, pointing at exactly what proves it. The next review reads your note next to the evidence; the note alone passes nothing.',
+      );
     }
     if (goalLoop.failedChecks && goalLoop.failedChecks.length > 0) {
       taskLines.push('  Unresolved checks from the last round:');
       for (const [i, check] of goalLoop.failedChecks.entries()) {
         taskLines.push(`    ${i + 1}. ${check.title}${check.why ? ` — ${check.why}` : ''}`);
+      }
+    }
+    if (goalLoop.disputeRulings && goalLoop.disputeRulings.length > 0) {
+      taskLines.push('  Disputed criteria already ruled on:');
+      for (const ruling of goalLoop.disputeRulings) {
+        taskLines.push(
+          ruling.outcome === 'upheld'
+            ? `    - ${ruling.title} — upheld. File the same \`invalid_criterion\` dispute in this run to carry the waiver; no new ruling is needed.`
+            : `    - ${ruling.title} — overruled. It stands; satisfy it.`,
+        );
       }
     }
     taskLines.push(
