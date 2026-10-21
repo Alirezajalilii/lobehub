@@ -14,6 +14,9 @@ const hideSyncAlert = (s: UserStore) => s.preference.hideSyncAlert;
 
 const hideSettingsMoveGuide = (s: UserStore) => s.preference.guide?.moveSettingsToAvatar;
 
+/** Whether the "Pages and Resources are now Docs" notice was acknowledged. */
+const docsMergedNoticeSeen = (s: UserStore) => !!s.preference.guide?.docsMerged;
+
 const showUploadFileInKnowledgeBaseTip = (s: UserStore) =>
   s.preference.guide?.uploadFileInKnowledgeBase;
 
@@ -28,6 +31,7 @@ const terminalFontFamily = (s: UserStore): string | undefined =>
 
 export const preferenceSelectors = {
   defaultOpenInApp,
+  docsMergedNoticeSeen,
   fontFamily,
   hideSettingsMoveGuide,
   hideSyncAlert,
