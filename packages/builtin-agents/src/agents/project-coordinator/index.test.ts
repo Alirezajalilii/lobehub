@@ -28,4 +28,10 @@ describe('createProjectCoordinatorAgentConfig', () => {
 
     expect(config.systemRole).not.toContain('Project description:');
   });
+
+  it('names the project without a prefix when it has no identifier', () => {
+    const config = createProjectCoordinatorAgentConfig({ name: 'LobeHub' });
+
+    expect(config.systemRole).toContain('You are the coordinator for the project "LobeHub".');
+  });
 });

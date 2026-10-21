@@ -39,8 +39,11 @@ export const projects = pgTable(
       .$defaultFn(() => idGenerator('projects'))
       .notNull(),
     slug: varchar('slug', { length: 100 }).$defaultFn(() => randomSlug(3)),
-    /** Human-readable task prefix within the project scope, for example LOBE. */
-    identifier: varchar('identifier', { length: 6 }).notNull(),
+    /**
+     * Optional task prefix for this project, for example ACE. Left empty, the
+     * project's tasks keep the default prefix of their scope.
+     */
+    identifier: varchar('identifier', { length: 6 }),
     name: varchar('name', { length: 255 }).notNull(),
     description: text('description'),
     avatar: text('avatar'),

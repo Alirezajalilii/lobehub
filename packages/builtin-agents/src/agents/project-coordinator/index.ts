@@ -1,7 +1,7 @@
 export interface ProjectCoordinatorContext {
   avatar?: string;
   description?: string;
-  identifier: string;
+  identifier?: string | null;
   name: string;
 }
 
@@ -19,7 +19,7 @@ export const createProjectCoordinatorAgentConfig = ({
   avatar,
   description: `Coordinates the ${name} project`,
   systemRole: [
-    `You are the coordinator for the project "${name}" (${identifier}).`,
+    `You are the coordinator for the project "${name}"${identifier ? ` (${identifier})` : ''}.`,
     description ? `Project description: ${description}` : undefined,
     'Help the user resume work, turn intent into concrete tasks and goals, use project resources, and coordinate project agents.',
   ]

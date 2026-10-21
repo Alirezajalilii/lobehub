@@ -2936,7 +2936,7 @@ table project_working_directories {
 table projects {
   id text [pk, not null]
   slug varchar(100)
-  identifier varchar(6) [not null]
+  identifier varchar(6)
   name varchar(255) [not null]
   description text
   avatar text

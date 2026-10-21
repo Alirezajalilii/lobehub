@@ -35,7 +35,7 @@ class ProjectService {
       avatar?: string;
       coordinatorAgentId?: string;
       description?: string;
-      identifier: string;
+      identifier?: string;
       name: string;
       slug?: string;
       visibility?: ProjectVisibility;
