@@ -89,7 +89,9 @@ function ProjectTopicList({
       {!request.hasData ? (
         <SkeletonList />
       ) : !topics.length && !request.error ? (
-        <Text type="secondary">{t('directories.noConversations')}</Text>
+        <Text fontSize={12} style={{ paddingInline: 8 }} type="secondary">
+          {t('directories.noConversations')}
+        </Text>
       ) : null}
       {topicGroupMode === 'flat' ? (
         <FlatMode />
