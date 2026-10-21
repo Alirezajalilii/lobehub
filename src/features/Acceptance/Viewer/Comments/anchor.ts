@@ -18,11 +18,15 @@ export const commentIdFromHash = (hash: string): string | undefined => {
   return value.startsWith(PREFIX) ? value.slice(PREFIX.length) || undefined : undefined;
 };
 
-/** The link to hand someone else — this page, this comment. */
-export const commentAnchorUrl = (commentId: string) => {
+/**
+ * The link to hand someone else — this page, this comment. `appOrigin` comes
+ * from `useAppOrigin`, not `window.location`: on desktop that is the
+ * `app://renderer` shell, which nobody else can open.
+ */
+export const commentAnchorUrl = (commentId: string, appOrigin: string) => {
   if (typeof window === 'undefined') return '';
-  const { origin, pathname, search } = window.location;
-  return `${origin}${pathname}${search}#${commentAnchorId(commentId)}`;
+  const { pathname, search } = window.location;
+  return `${appOrigin}${pathname}${search}#${commentAnchorId(commentId)}`;
 };
 
 /** How long a linked comment is held in view while the evidence above it loads. */

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { commentAnchorId, commentIdFromHash, holdInView } from './anchor';
+import { commentAnchorId, commentAnchorUrl, commentIdFromHash, holdInView } from './anchor';
 
 describe('comment anchors', () => {
   it('round-trips a comment id through the fragment', () => {
@@ -15,6 +15,14 @@ describe('comment anchors', () => {
     expect(commentIdFromHash('#check-c2')).toBeUndefined();
     // A bare prefix names no comment.
     expect(commentIdFromHash('#comment-')).toBeUndefined();
+  });
+
+  it('links to this page under the app origin, not the renderer shell', () => {
+    window.history.replaceState(null, '', '/lobehub/project/p1/acceptance/a1?round=2');
+
+    expect(commentAnchorUrl('c1', 'https://app.lobehub.com')).toBe(
+      'https://app.lobehub.com/lobehub/project/p1/acceptance/a1?round=2#comment-c1',
+    );
   });
 });
 
