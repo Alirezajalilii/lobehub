@@ -39,6 +39,7 @@ export interface ProjectStoreState {
 
 interface ProjectStore extends ProjectStoreState {
   createProject: (input: {
+    coordinatorAgentId?: string;
     identifier: string;
     name: string;
     slug?: string;

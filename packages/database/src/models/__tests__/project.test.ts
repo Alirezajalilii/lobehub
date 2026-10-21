@@ -9,6 +9,7 @@ import {
   agents,
   environments,
   knowledgeBases,
+  projectAgents,
   projectCompletionReviews,
   projectEnvironments,
   projects,
@@ -112,6 +113,37 @@ describe('ProjectModel', () => {
       expect.objectContaining({ coordinatorAgentId: inbox?.id, id: project.id }),
     ]);
     expect(await model.delete(project.id)).toEqual(expect.objectContaining({ id: project.id }));
+  });
+
+  it('creates a project led by a picked agent without provisioning a coordinator', async () => {
+    const picked = await new AgentModel(serverDB, userId).create({ title: 'Planner' });
+    const agentCount = (await serverDB.select().from(agents).where(eq(agents.userId, userId)))
+      .length;
+
+    const project = await createProject(model, { coordinatorAgentId: picked.id, name: 'Picked' });
+
+    expect(project.coordinatorAgentId).toBe(picked.id);
+    expect(await serverDB.select().from(agents).where(eq(agents.userId, userId))).toHaveLength(
+      agentCount,
+    );
+    expect(
+      await serverDB
+        .select({ role: projectAgents.role })
+        .from(projectAgents)
+        .where(eq(projectAgents.projectId, project.id)),
+    ).toEqual([{ role: 'coordinator' }]);
+
+    await model.delete(project.id);
+    expect(await serverDB.select().from(agents).where(eq(agents.id, picked.id))).toHaveLength(1);
+  });
+
+  it('refuses to create a project led by an agent outside the scope', async () => {
+    const foreign = await new AgentModel(serverDB, otherUserId).create({ title: 'Foreign' });
+
+    await expect(
+      createProject(model, { coordinatorAgentId: foreign.id, name: 'Foreign-led' }),
+    ).rejects.toThrow('Agent not found');
+    expect(await serverDB.select().from(projects).where(eq(projects.userId, userId))).toEqual([]);
   });
 
   it('creates, lists, updates, and deletes a project in the owner scope', async () => {
