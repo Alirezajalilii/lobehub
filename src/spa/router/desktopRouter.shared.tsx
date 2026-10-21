@@ -78,7 +78,6 @@ import { activityListLoader } from '@/spa/router/activityListLoader';
 import { agentChatTopicListLoader } from '@/spa/router/agentChatTopicListLoader';
 import { agentDocumentListLoader } from '@/spa/router/agentDocumentListLoader';
 import { channelDataLoader } from '@/spa/router/channelDataLoader';
-import { contextListLoader } from '@/spa/router/contextListLoader';
 import { identitiesListLoader } from '@/spa/router/identitiesListLoader';
 import { libraryTreeLoader } from '@/spa/router/libraryTreeLoader';
 import { pageListLoader } from '@/spa/router/pageListLoader';
@@ -797,19 +796,7 @@ export const sharedMainAreaChildren: RouteObject[] = [
         handle: {
           meta: routeMeta({ icon: BrainCircuit, titleKey: 'navigation.memoryContexts' }),
         },
-        // Seed the persisted head page before the page paints (see `contextListLoader`).
-        loader: contextListLoader,
         path: 'contexts',
-      },
-      {
-        element: dynamicElement(
-          () => import('@/routes/(main)/memory/entities'),
-          'Desktop > Memory > Entities',
-        ),
-        handle: {
-          meta: routeMeta({ icon: BrainCircuit, titleKey: 'navigation.memoryContexts' }),
-        },
-        path: 'entities',
       },
       {
         element: dynamicElement(
