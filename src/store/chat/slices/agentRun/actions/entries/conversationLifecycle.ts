@@ -1327,6 +1327,7 @@ export class ConversationLifecycleActionImpl {
     const sandboxInstanceMetadata: ChatTopicMetadata | undefined = pendingSandboxSelection
       ? {
           sandboxDrive: pendingSandboxSelection.drive,
+          sandboxEnvironmentId: pendingSandboxSelection.environmentId,
           sandboxInstanceId: pendingSandboxSelection.instanceId,
           sandboxWorkingDirectory: pendingSandboxSelection.workingDirectory,
         }
