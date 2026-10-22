@@ -2,7 +2,7 @@
  * @vitest-environment happy-dom
  */
 import { AccordionRoot } from '@lobehub/ui';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { TopicListScopeContext } from '../../TopicListScope';
@@ -181,6 +181,30 @@ describe('TopicByAgentGroupItem', () => {
     renderGroup();
 
     expect(screen.getAllByRole('button', { name: 'directories.start' })).toHaveLength(1);
+  });
+
+  /** @example User report: the project sidebar hid devices that had no topics yet. */
+  it('lists every startable device and offers a new topic inside an empty device section', async () => {
+    // ROOT CAUSE: device sections were built from topics only, so a bound
+    // device without topics never showed up and could not start one in place.
+    const { openProjectTopicModal } =
+      await import('@/features/Projects/WorkingDirectories/StartDirectoryModal');
+    subGroupModes[GROUP_ID] = 'byDevice';
+    directories.splice(
+      0,
+      directories.length,
+      { deviceId: 'device-1', id: 'binding-mac', instanceId: 'ins-mac' },
+      { deviceId: 'device-2', id: 'binding-linux-new', instanceId: 'ins-linux' },
+    );
+    renderGroup();
+    // Topics now only run on the MacBook; the Linux box has none.
+    expect(screen.getByRole('button', { name: 'Studio Linux' })).toBeTruthy();
+
+    fireEvent.click(screen.getByText('actions.addNewTopic'));
+
+    expect(openProjectTopicModal).toHaveBeenCalledWith(
+      expect.objectContaining({ initialDirectoryId: 'binding-linux-new' }),
+    );
   });
 
   const renderInProject = (agentId: string) =>
